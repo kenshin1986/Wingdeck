@@ -1,0 +1,24 @@
+appId: com.kenshin1986.wingdeck
+productName: Wingdeck
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - '**/node_modules/@lydell/node-pty/**'
+npmRebuild: false
+extraResources:
+  - from: build/tray.png
+    to: tray.png
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Wingdeck

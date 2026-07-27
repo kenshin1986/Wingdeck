@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+*.log
+
+# Config y estado local (no debería versionarse)
+.claude/
+.env
+*.local
+.vscode/
+
+# Artefactos intermedios de build/icon.ico (gen-icon.ps1 los borra solo tras generar el .ico)
+build/icon-*.png
