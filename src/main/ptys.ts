@@ -182,6 +182,25 @@ export class PtyManager {
     let args: string[] = []
     let cwd = session.cwd
 
+    // Wingdeck es una app GUI, no se lanza desde una shell — hereda un process.env
+    // sin TERM/COLORTERM. ConPTY ya soporta ANSI de por sí, pero algunas herramientas
+    // (CLIs de Node, algunos tools de Python/Ruby) consultan estas variables para
+    // decidir si emiten color. WSL gestiona su propio entorno Linux, no hace falta acá.
+    if (session.shell !== 'wsl') {
+      env.TERM = 'xterm-256color'
+      env.COLORTERM = 'truecolor'
+
+      // Claves de API configuradas en el asistente de configuración inicial (⚙ →
+      // "Repetir configuración inicial"), para agentes que aceptan auth por variable
+      // de entorno en vez de su login por navegador. Solo se setean si el usuario
+      // cargó algo — así nunca pisan una clave que ya tuviera en su entorno real.
+      // No aplica a WSL: wsl.exe no hereda el env de Windows salvo vía WSLENV.
+      const { apiKeys } = this.getSettings()
+      if (apiKeys?.anthropic) env.ANTHROPIC_API_KEY = apiKeys.anthropic
+      if (apiKeys?.openai) env.OPENAI_API_KEY = apiKeys.openai
+      if (apiKeys?.gemini) env.GEMINI_API_KEY = apiKeys.gemini
+    }
+
     const isLinuxPath = cwd.startsWith('/')
     if (session.shell !== 'wsl' && (isLinuxPath || !existsSync(cwd))) cwd = homedir()
 

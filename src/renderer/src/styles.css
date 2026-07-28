@@ -6,13 +6,36 @@
   --bg: #0a0e14;
   --bg-panel: #10151f;
   --bg-card: #0d1117;
+  --bg-elev: #131a26;
   --border: #1c2433;
   --border-soft: #161d2a;
+  --border-strong: #2c3a55;
   --text: #dee7f0;
   --text-dim: #7d8aa0;
   --text-faint: #4b5568;
   --accent: #7aa2f7;
   --danger: #f7768e;
+  --warn: #e0af68;
+  --ok: #9ece6a;
+  --surface: var(--bg-panel);
+
+  /* Tintes del accent global (topbar/popovers genéricos, no por-terminal) */
+  --accent-softest: color-mix(in oklab, var(--accent) 7%, transparent);
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
+  --accent-mid: color-mix(in oklab, var(--accent) 22%, transparent);
+  --accent-glow: color-mix(in oklab, var(--accent) 45%, transparent);
+
+  /* Color por-terminal: cada tarjeta lo pisa vía style={{ '--term-color': accent }} */
+  --card-accent: var(--accent);
+
+  /* Alto del header — desacopla los overlays/popovers que dependían de "32px" a mano */
+  --header-h: 34px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 110ms;
+  --dur: 180ms;
+  --dur-slow: 320ms;
 }
 
 html,
@@ -69,9 +92,9 @@ body {
 }
 
 .count-chip {
-  background: rgba(122, 162, 247, 0.12);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
   color: var(--accent);
-  border: 1px solid rgba(122, 162, 247, 0.25);
+  border: 1px solid color-mix(in oklab, var(--accent) 25%, transparent);
   border-radius: 999px;
   padding: 2px 10px;
   font-size: 11px;
@@ -90,7 +113,7 @@ body {
 }
 
 .ws-button {
-  background: rgba(122, 162, 247, 0.08);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
   border: 1px solid var(--border);
   border-radius: 7px;
   color: var(--text);
@@ -101,8 +124,8 @@ body {
 }
 
 .ws-button:hover {
-  border-color: #2c3a55;
-  background: rgba(122, 162, 247, 0.14);
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
 .ws-caret {
@@ -173,7 +196,7 @@ body {
 }
 
 .meter-fill.hot {
-  background: linear-gradient(90deg, #e0af68, #f7768e);
+  background: linear-gradient(90deg, var(--warn), var(--danger));
 }
 
 .meter-value {
@@ -209,13 +232,49 @@ body {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  background: #131a26;
-  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-elev) 82%, transparent);
+  backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 5px;
   min-width: 230px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 18px 44px -12px rgba(0, 0, 0, 0.75);
   z-index: 1000;
+  animation: pop-in var(--dur) var(--ease-out);
+}
+
+.menu-item,
+.act-event,
+.cfg-row {
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+/* Entrada de popovers/menús que SÍ pueden moverse (no dependen de translateX(-50%)
+   para centrarse — ver fade-in más abajo para el caso que sí depende de eso). */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Solo opacidad — para superficies cuyo centrado depende de un transform existente
+   (p. ej. .term-resume-other-menu con translateX(-50%)), que pop-in rompería. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .menu-row {
@@ -240,7 +299,7 @@ body {
 }
 
 .menu-item:hover {
-  background: rgba(122, 162, 247, 0.12);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
 }
 
 .menu-icon {
@@ -261,7 +320,7 @@ body {
 }
 
 .menu-folder:hover {
-  background: rgba(122, 162, 247, 0.12);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
   opacity: 1;
 }
 
@@ -352,31 +411,122 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--accent);
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
   position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+
+  --card-accent: var(--term-color, var(--accent));
+
+  /* El color entra por arriba-izquierda y muere antes del área de texto (nunca hay
+     transparencia real bajo el canvas WebGL de xterm — la última capa es opaca). */
+  background:
+    radial-gradient(
+      130% 75% at 0% 0%,
+      color-mix(in oklab, var(--card-accent) 16%, transparent) 0%,
+      color-mix(in oklab, var(--card-accent) 5%, transparent) 38%,
+      transparent 72%
+    ),
+    var(--bg-card);
+
+  border: 1px solid color-mix(in oklab, var(--card-accent) 20%, var(--border));
+
+  box-shadow:
+    0 10px 28px -6px rgba(0, 0, 0, 0.55),
+    0 0 22px -14px color-mix(in oklab, var(--card-accent) 60%, transparent);
+
+  transition:
+    border-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+}
+
+/* Riel superior: reemplaza el border-top plano por un degradé direccional.
+   z-index bajo (muy por debajo de overlays=50 y popovers=100) y pointer-events:none
+   para no robar el drag del header, que vive en el mismo elemento visualmente. */
+.term-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  pointer-events: none;
+  z-index: 3;
+  background: linear-gradient(
+    90deg,
+    var(--card-accent) 0%,
+    color-mix(in oklab, var(--card-accent) 55%, transparent) 45%,
+    color-mix(in oklab, var(--card-accent) 14%, transparent) 100%
+  );
+  opacity: 0.85;
+  transition:
+    opacity var(--dur) var(--ease-out),
+    height var(--dur) var(--ease-out);
+}
+
+/* Sin transform en el hover de la tarjeta completa: movería el canvas WebGL de xterm
+   (texto borroso / re-layout mientras se escribe). La vida se siente en borde+sombra. */
+.term-card:hover {
+  border-color: color-mix(in oklab, var(--card-accent) 40%, var(--border));
+  box-shadow:
+    0 14px 34px -8px rgba(0, 0, 0, 0.62),
+    0 0 30px -10px color-mix(in oklab, var(--card-accent) 55%, transparent);
+}
+.term-card:hover::after {
+  opacity: 1;
+}
+
+.grid-item.is-focused .term-card {
+  border-color: color-mix(in oklab, var(--card-accent) 52%, var(--border));
+  box-shadow:
+    0 24px 70px -12px rgba(0, 0, 0, 0.78),
+    0 0 64px -18px color-mix(in oklab, var(--card-accent) 70%, transparent);
+}
+.grid-item.is-focused .term-card::after {
+  height: 3px;
+  opacity: 1;
 }
 
 .react-grid-item.react-draggable-dragging .term-card,
 .react-grid-item.resizing .term-card {
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.65);
-  border-color: #2c3a55;
+  border-color: color-mix(in oklab, var(--card-accent) 60%, var(--border));
+  box-shadow:
+    0 22px 52px -10px rgba(0, 0, 0, 0.72),
+    0 0 42px -12px color-mix(in oklab, var(--card-accent) 75%, transparent);
 }
 
 .term-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 8px 0 10px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border-soft);
+  gap: 7px;
+  height: var(--header-h);
+  padding: 0 6px 0 10px;
   cursor: grab;
   flex-shrink: 0;
+  position: relative;
+
+  /* Barra elevada: tinte del accent arriba, cae al panel abajo */
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--card-accent) 14%, var(--bg-panel)) 0%,
+    color-mix(in oklab, var(--card-accent) 6%, var(--bg-panel)) 55%,
+    var(--bg-panel) 100%
+  );
+  border-bottom: 1px solid color-mix(in oklab, var(--card-accent) 18%, var(--border-soft));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 8px 16px -12px rgba(0, 0, 0, 0.95);
+  transition:
+    background var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out);
+}
+
+.term-header:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--card-accent) 21%, var(--bg-panel)) 0%,
+    color-mix(in oklab, var(--card-accent) 9%, var(--bg-panel)) 55%,
+    var(--bg-panel) 100%
+  );
 }
 
 .term-header:active {
@@ -384,102 +534,231 @@ body {
 }
 
 .term-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: #4b5568;
+  /* Idle toma un tinte desaturado del accent de la tarjeta — cada terminal tiene
+     identidad propia incluso sin actividad, en vez de gris puro universal. */
+  background: color-mix(in oklab, var(--card-accent) 50%, var(--text-faint));
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 6px -1px color-mix(in oklab, var(--card-accent) 55%, transparent);
+  transition:
+    background var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
 }
 
 .term-dot.dot-working {
-  background: #9ece6a;
-  animation: pulse-dot 1.6s ease-in-out infinite;
+  /* Verde sólido: señal semántica universal ya aprendida, no se reemplaza por el
+     accent — la vida nueva de "trabajando" va al riel de la tarjeta (rail-sweep). */
+  background: var(--ok);
+  animation: pulse-dot 1.6s var(--ease-inout) infinite;
 }
 
 .term-dot.dot-attention {
-  background: #e0af68;
-  box-shadow: 0 0 8px rgba(224, 175, 104, 0.8);
+  background: var(--warn);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 12px 0 color-mix(in oklab, var(--warn) 85%, transparent);
 }
 
 .term-dot.dot-idle {
-  background: #4b5568;
+  background: color-mix(in oklab, var(--card-accent) 50%, var(--text-faint));
 }
 
+/* Reescrito: reponer el anillo base en cada frame, si no desaparece durante el pulso */
 @keyframes pulse-dot {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(158, 206, 106, 0.55);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.55),
+      0 0 9px -1px color-mix(in oklab, var(--ok) 80%, transparent),
+      0 0 0 0 color-mix(in oklab, var(--ok) 55%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(158, 206, 106, 0);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.55),
+      0 0 9px -1px color-mix(in oklab, var(--ok) 80%, transparent),
+      0 0 0 5px transparent;
   }
 }
 
+/* WORKING = movimiento direccional en el riel (progreso). El punto sigue verde sólido
+   (semántica universal); acá va la vida nueva de "algo se está moviendo". */
+.term-card.is-working {
+  border-color: color-mix(in oklab, var(--ok) 24%, var(--border));
+}
+
+.term-card.is-working::after {
+  opacity: 1;
+  background:
+    linear-gradient(
+        90deg,
+        transparent 0%,
+        color-mix(in oklab, var(--card-accent) 88%, white) 50%,
+        transparent 100%
+      )
+      0 0 / 34% 100% no-repeat,
+    linear-gradient(
+      90deg,
+      var(--card-accent) 0%,
+      color-mix(in oklab, var(--card-accent) 45%, transparent) 100%
+    );
+  animation: rail-sweep 2.4s var(--ease-inout) infinite;
+}
+
+@keyframes rail-sweep {
+  from {
+    background-position: -40% 0, 0 0;
+  }
+  to {
+    background-position: 140% 0, 0 0;
+  }
+}
+
+/* ATTENTION = pulso ámbar en toda la tarjeta (reescrito: reponer la sombra base en
+   cada frame, si no desaparece durante la animación con el nuevo box-shadow de reposo). */
 .term-card.is-attention {
-  border-color: rgba(224, 175, 104, 0.65);
-  animation: glow-attention 1.8s ease-in-out infinite;
+  border-color: color-mix(in oklab, var(--warn) 55%, var(--border));
+  animation: glow-attention 1.8s var(--ease-inout) infinite;
 }
 
 @keyframes glow-attention {
   0%,
   100% {
-    box-shadow: 0 0 14px rgba(224, 175, 104, 0.22), 0 6px 22px rgba(0, 0, 0, 0.4);
+    box-shadow:
+      0 10px 28px -6px rgba(0, 0, 0, 0.55),
+      0 0 16px -6px color-mix(in oklab, var(--warn) 45%, transparent);
   }
   50% {
-    box-shadow: 0 0 26px rgba(224, 175, 104, 0.5), 0 6px 22px rgba(0, 0, 0, 0.4);
+    box-shadow:
+      0 10px 28px -6px rgba(0, 0, 0, 0.55),
+      0 0 32px -4px color-mix(in oklab, var(--warn) 75%, transparent);
   }
 }
 
 .term-card.is-highlight {
-  animation: highlight-flash 0.8s ease-in-out 3;
+  animation: highlight-flash 0.8s var(--ease-inout) 3;
 }
 
 @keyframes highlight-flash {
   0%,
   100% {
-    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 10px 28px -6px rgba(0, 0, 0, 0.55);
   }
   50% {
-    box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.9), 0 0 30px rgba(122, 162, 247, 0.5);
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--card-accent) 85%, transparent),
+      0 0 40px -6px color-mix(in oklab, var(--card-accent) 70%, transparent),
+      0 10px 28px -6px rgba(0, 0, 0, 0.55);
   }
+}
+
+/* EXITED: una sola línea desatura riel, header, dot, chip shell y glow del título */
+.term-card.is-exited {
+  --card-accent: var(--text-faint);
+}
+
+.term-card.is-exited::after {
+  opacity: 0.4;
 }
 
 .term-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 2px 3px;
+  border-radius: 999px;
   font-size: 10.5px;
   font-weight: 700;
-  border: 1px solid;
-  border-radius: 5px;
-  padding: 1px 6px;
-  flex-shrink: 0;
+  letter-spacing: 0.2px;
   white-space: nowrap;
+  flex-shrink: 0;
+  color: color-mix(in oklab, var(--agent-color) 62%, var(--text));
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--agent-color) 26%, transparent),
+    color-mix(in oklab, var(--agent-color) 10%, transparent)
+  );
+  border: 1px solid color-mix(in oklab, var(--agent-color) 45%, transparent);
+  box-shadow: 0 0 14px -5px color-mix(in oklab, var(--agent-color) 85%, transparent);
+  transition:
+    box-shadow var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out);
+}
+
+.term-agent-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  color: #0a0e14;
+  background: var(--agent-color);
+  box-shadow: 0 0 10px -2px color-mix(in oklab, var(--agent-color) 90%, transparent);
+}
+
+.term-card.is-working .term-agent {
+  border-color: color-mix(in oklab, var(--agent-color) 65%, transparent);
+  box-shadow: 0 0 18px -4px color-mix(in oklab, var(--agent-color) 95%, transparent);
 }
 
 .term-ready {
-  color: #e0af68;
-  font-size: 10.5px;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
   white-space: nowrap;
   flex-shrink: 0;
-  animation: blink-soft 1.4s ease-in-out infinite;
+  color: #16110a;
+  background: var(--warn);
+  animation: ready-breathe 2s var(--ease-inout) infinite;
 }
 
-@keyframes blink-soft {
+@keyframes ready-breathe {
   0%,
   100% {
-    opacity: 1;
+    box-shadow: 0 0 14px -4px color-mix(in oklab, var(--warn) 90%, transparent);
   }
   50% {
-    opacity: 0.45;
+    box-shadow: 0 0 22px 0px color-mix(in oklab, var(--warn) 95%, transparent);
   }
 }
 
 .term-title {
-  font-weight: 600;
+  font-weight: 650;
   font-size: 12.5px;
+  letter-spacing: 0.1px;
+  color: var(--text);
+  text-shadow: 0 0 16px color-mix(in oklab, var(--card-accent) 28%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+  transition:
+    color var(--dur) var(--ease-out),
+    text-shadow var(--dur) var(--ease-out);
+}
+
+.term-card:hover .term-title,
+.term-card.is-working .term-title,
+.grid-item.is-focused .term-title {
+  color: color-mix(in oklab, var(--card-accent) 30%, var(--text));
+  text-shadow: 0 0 18px color-mix(in oklab, var(--card-accent) 45%, transparent);
+}
+
+.term-title:hover {
+  text-decoration: underline dotted color-mix(in oklab, var(--card-accent) 55%, transparent);
+  text-underline-offset: 3px;
 }
 
 .term-title-input {
@@ -520,11 +799,15 @@ body {
 
 .term-shell {
   font-family: Consolas, monospace;
-  font-size: 10.5px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
   padding: 1px 6px;
+  border-radius: 5px;
   flex-shrink: 0;
+  color: color-mix(in oklab, var(--card-accent) 60%, var(--text-dim));
+  background: color-mix(in oklab, var(--card-accent) 9%, transparent);
+  border: 1px solid color-mix(in oklab, var(--card-accent) 20%, transparent);
 }
 
 .term-cwd {
@@ -535,14 +818,20 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0.82;
+  transition: opacity var(--dur) var(--ease-out);
   direction: rtl;
   text-align: left;
 }
 
 .term-branch {
-  color: var(--text-faint);
+  padding: 1px 6px;
+  border-radius: 5px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-soft);
   font-family: Consolas, monospace;
-  font-size: 10.5px;
+  font-size: 10px;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -553,50 +842,100 @@ body {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   flex-shrink: 0;
+  transition: color var(--dur) var(--ease-out);
+}
+
+.term-card:hover .term-cwd {
+  opacity: 1;
+}
+
+.term-card:hover .term-stats {
+  color: var(--text-dim);
 }
 
 .term-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-faint);
   font-size: 13px;
   cursor: pointer;
-  border-radius: 5px;
+  border-radius: 6px;
   width: 24px;
   height: 24px;
   line-height: 1;
   flex-shrink: 0;
+  opacity: 0.7;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.term-card:hover .term-btn,
+.term-card.is-attention .term-btn,
+.term-btn.has-cmd,
+.term-btn:focus-visible {
+  opacity: 1;
 }
 
 .term-btn:hover {
-  background: rgba(122, 162, 247, 0.15);
-  color: var(--text);
+  background: color-mix(in oklab, var(--card-accent) 18%, transparent);
+  border-color: color-mix(in oklab, var(--card-accent) 34%, transparent);
+  color: color-mix(in oklab, var(--card-accent) 55%, var(--text));
+  transform: translateY(-1px);
+}
+
+.term-btn:active {
+  transform: translateY(0) scale(0.92);
+}
+
+.term-btn:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--card-accent) 70%, transparent);
+  outline-offset: 1px;
 }
 
 .term-btn-close:hover {
-  background: rgba(247, 118, 142, 0.18);
+  background: color-mix(in oklab, var(--danger) 20%, transparent);
+  border-color: color-mix(in oklab, var(--danger) 42%, transparent);
   color: var(--danger);
 }
 
 .term-btn.has-cmd {
-  color: #e0af68;
+  color: var(--warn);
+}
+
+.term-btn.has-cmd:hover {
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  border-color: color-mix(in oklab, var(--warn) 38%, transparent);
+  color: var(--warn);
 }
 
 .cmd-popover {
   position: absolute;
-  top: 34px;
+  top: calc(var(--header-h) + 2px);
   right: 8px;
   z-index: 100;
-  background: #131a26;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--bg-elev) 80%, transparent);
+  backdrop-filter: blur(16px) saturate(1.35);
+  border: 1px solid color-mix(in oklab, var(--card-accent) 26%, var(--border));
   padding: 12px;
   width: 320px;
   max-width: calc(100% - 16px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 18px 44px -12px rgba(0, 0, 0, 0.8);
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transform-origin: top right;
+  animation: pop-in 160ms var(--ease-out);
 }
 
 .cmd-popover label {
@@ -644,28 +983,61 @@ body {
 }
 
 .is-exited .term-body {
-  opacity: 0.35;
+  opacity: 0.3;
+  filter: grayscale(0.6);
 }
 
 .term-exit-overlay {
   position: absolute;
-  inset: 32px 0 0;
+  inset: var(--header-h) 0 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(10, 14, 20, 0.6);
-  backdrop-filter: blur(2px);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--card-accent) 8%, rgba(10, 14, 20, 0.72)),
+    rgba(6, 9, 14, 0.82)
+  );
+  backdrop-filter: blur(6px) saturate(1.1);
   /* Sin esto, la capa de links de xterm (canvas WebGL) queda arriba en el
      hit-testing real del mouse aunque el overlay se vea encima visualmente —
      los clics/hover terminan yendo al terminal, no a los botones. */
   z-index: 50;
+  animation: fade-in 200ms var(--ease-out);
 }
 
 .term-exit-overlay p {
   color: var(--text-dim);
   margin: 0;
+}
+
+/* ── Click-para-navegar en menús de consola (alt-buffer) ──────────────
+   Tiras clickeables ancladas por fila sobre el área de texto de la terminal;
+   ver useMenuHighlightOverlay.ts. Sin glassmorphism a propósito: esto vive
+   encima de contenido en vivo, debe leerse como parte del texto, no como un
+   popover transitorio. */
+.menu-click-overlay {
+  position: absolute;
+  inset: var(--header-h) 0 0;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.menu-click-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  cursor: pointer;
+  border-radius: 4px;
+  pointer-events: auto;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+
+.menu-click-row:hover {
+  background: color-mix(in oklab, var(--card-accent) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--card-accent) 30%, transparent);
 }
 
 .term-resume-overlay {
@@ -735,6 +1107,7 @@ body {
   right: auto;
   transform: translateX(-50%);
   width: 180px;
+  animation: fade-in 160ms var(--ease-out);
 }
 
 .term-resume-never {
@@ -751,7 +1124,7 @@ body {
 
 .act-bell {
   position: relative;
-  background: rgba(122, 162, 247, 0.08);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
   border: 1px solid var(--border);
   border-radius: 7px;
   color: var(--text);
@@ -762,8 +1135,8 @@ body {
 }
 
 .act-bell:hover {
-  border-color: #2c3a55;
-  background: rgba(122, 162, 247, 0.14);
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
 .act-bell.has-unseen {
@@ -774,7 +1147,7 @@ body {
   position: absolute;
   top: -6px;
   right: -6px;
-  background: #e0af68;
+  background: var(--warn);
   color: #1a1206;
   font-size: 10px;
   font-weight: 800;
@@ -839,7 +1212,7 @@ body {
 }
 
 .act-event:hover {
-  background: rgba(122, 162, 247, 0.1);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
 }
 
 .act-event-icon {
@@ -888,7 +1261,7 @@ body {
 }
 
 .cfg-row:hover {
-  background: rgba(122, 162, 247, 0.08);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
 }
 
 .cfg-row input[type='checkbox'] {
@@ -920,12 +1293,17 @@ body {
 .ctx-menu {
   position: fixed;
   z-index: 1501;
-  background: #131a26;
-  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-elev) 82%, transparent);
+  backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 5px;
   min-width: 250px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transform-origin: top left;
+  animation: pop-in 140ms var(--ease-out);
 }
 
 .ctx-menu .menu-item {
@@ -954,18 +1332,19 @@ body {
 
 .drop-overlay {
   position: absolute;
-  inset: 32px 0 0;
+  inset: var(--header-h) 0 0;
   z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(122, 162, 247, 0.14);
-  border: 2px dashed rgba(122, 162, 247, 0.6);
+  background: color-mix(in oklab, var(--card-accent) 16%, transparent);
+  border: 2px dashed color-mix(in oklab, var(--card-accent) 65%, transparent);
   border-radius: 0 0 10px 10px;
   color: var(--text);
   font-weight: 600;
   pointer-events: none;
-  backdrop-filter: blur(1px);
+  backdrop-filter: blur(3px);
+  animation: fade-in 160ms var(--ease-out);
 }
 
 .toast {
@@ -976,7 +1355,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #131a26;
+  background: var(--bg-elev);
   border: 1px solid rgba(224, 175, 104, 0.45);
   border-radius: 12px;
   padding: 12px 16px;
@@ -1011,7 +1390,7 @@ body {
 /* ── Botón secundario (Flotas, Broadcast) ────────── */
 
 .btn-secondary {
-  background: rgba(122, 162, 247, 0.06);
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
   border: 1px solid var(--border);
   border-radius: 7px;
   color: var(--text-dim);
@@ -1022,8 +1401,8 @@ body {
 }
 
 .btn-secondary:hover {
-  border-color: #2c3a55;
-  background: rgba(122, 162, 247, 0.12);
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
   color: var(--text);
 }
 
@@ -1044,7 +1423,7 @@ body {
   margin-left: auto;
   color: var(--text-faint);
   font-size: 10.5px;
-  background: rgba(122, 162, 247, 0.1);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
   border-radius: 999px;
   padding: 1px 7px;
 }
@@ -1184,15 +1563,11 @@ body {
 
 /* ── Cola de prompts ──────────────────────────────── */
 
-.term-btn {
-  position: relative;
-}
-
 .term-btn-badge {
   position: absolute;
   top: -2px;
   right: -2px;
-  background: #7aa2f7;
+  background: var(--card-accent);
   color: #08101f;
   font-size: 9px;
   font-weight: 800;
@@ -1201,6 +1576,7 @@ body {
   height: 13px;
   line-height: 13px;
   padding: 0 3px;
+  box-shadow: 0 0 8px -2px color-mix(in oklab, var(--card-accent) 90%, transparent);
 }
 
 .queue-popover {
@@ -1280,7 +1656,7 @@ body {
 }
 
 .toast-queue {
-  border-color: rgba(122, 162, 247, 0.45);
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
 }
 
 .toast-cpu {
@@ -1294,8 +1670,8 @@ body {
   align-items: center;
   gap: 4px;
   padding: 6px 8px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--card-accent) 7%, var(--bg-panel)), var(--bg-panel));
+  border-bottom: 1px solid color-mix(in oklab, var(--card-accent) 14%, var(--border-soft));
 }
 
 .search-input {
@@ -1317,8 +1693,8 @@ body {
 /* ── Ajustes de react-grid-layout ───────────────── */
 
 .react-grid-item.react-grid-placeholder {
-  background: rgba(122, 162, 247, 0.18) !important;
-  border: 1px dashed rgba(122, 162, 247, 0.5);
+  background: color-mix(in oklab, var(--accent) 18%, transparent) !important;
+  border: 1px dashed color-mix(in oklab, var(--accent) 50%, transparent);
   border-radius: 10px;
   opacity: 1 !important;
 }
@@ -1439,7 +1815,7 @@ body {
 }
 
 .onboarding-status-ok {
-  color: #9ece6a;
+  color: var(--ok);
 }
 
 .onboarding-status-missing {
@@ -1468,10 +1844,101 @@ body {
   overflow-x: auto;
 }
 
+.onboarding-subhead {
+  margin: 22px 0 6px;
+  font-size: 14px;
+  color: var(--text);
+  border-top: 1px solid var(--border-soft);
+  padding-top: 18px;
+}
+
+.onboarding-item-graphify {
+  margin-bottom: 16px;
+}
+
+.onboarding-item-action-col {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.onboarding-item-action-col .onboarding-cmd {
+  width: 100%;
+}
+
+.onboarding-apikeys {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #060a10;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.onboarding-apikey-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.onboarding-apikey-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.onboarding-apikey-usedby {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
+.onboarding-apikey-row input {
+  background: #0d1420;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+  outline: none;
+}
+
+.onboarding-apikey-row input:focus {
+  border-color: var(--accent);
+}
+
+.onboarding-apikeys-save {
+  align-self: flex-end;
+}
+
 .onboarding-hint {
   margin: 4px 0 18px;
   font-size: 11.5px;
   color: var(--text-faint);
+}
+
+/* ── Accesibilidad: menos movimiento ─────────────────
+   Corta animaciones/transiciones a casi-cero. Los estados working/attention/ready
+   siguen siendo distinguibles porque su color base (dot verde sólido, borde tinte
+   ámbar, pastilla ámbar) vive fuera del keyframe — solo el brillo/barrido animado
+   se pierde, no la señal misma. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .onboarding-actions {

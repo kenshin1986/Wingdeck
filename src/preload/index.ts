@@ -154,6 +154,7 @@ const api = {
   // ── Configuración inicial ─────────────────────────
   checkClisInstalled: (): Promise<Record<AgentKind, boolean>> =>
     ipcRenderer.invoke('onboarding:checkClis'),
+  checkGraphifyInstalled: (): Promise<boolean> => ipcRenderer.invoke('onboarding:checkGraphify'),
 
   // ── Cerebro del workspace ─────────────────────────
   getBrain: (workspace: string): Promise<WorkspaceBrain> => ipcRenderer.invoke('brain:get', workspace),

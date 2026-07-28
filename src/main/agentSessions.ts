@@ -329,6 +329,23 @@ export async function getInstalled(): Promise<Record<AgentKind, boolean>> {
   return installedPromise
 }
 
+// Graphify no es un AgentKind (no corre como shell/agente dentro de una terminal, es
+// una herramienta externa que los agentes invocan) — se cachea por separado.
+let graphifyCache: boolean | null = null
+let graphifyPromise: Promise<boolean> | null = null
+
+/** Cacheado por corrida — usado por el asistente de configuración inicial */
+export async function checkGraphifyInstalled(): Promise<boolean> {
+  if (graphifyCache !== null) return graphifyCache
+  if (!graphifyPromise) {
+    graphifyPromise = checkOne('graphify').then((v) => {
+      graphifyCache = v
+      return v
+    })
+  }
+  return graphifyPromise
+}
+
 /**
  * Chequeo sincrónico y barato ("¿vale la pena escanear esta carpeta?"), pensado para
  * llamarse dentro de spawnFor() antes de decidir si retener el startupCmd.

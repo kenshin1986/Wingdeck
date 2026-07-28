@@ -35,6 +35,7 @@ recuerdan la carpeta de trabajo, el título y la posición de cada terminal entr
 - **Resumen en los avisos**: el toast y el centro de actividad muestran las últimas líneas de salida de la terminal, no solo el título.
 - **Modo enfoque (⛶ / `Ctrl+Shift+F`)**: expande una terminal a pantalla completa sin perder su estado; clic en el fondo oscuro para volver a la grilla.
 - **Búsqueda en el historial (`Ctrl+F`)**: encuentra texto en todo el scrollback de una terminal (`Enter`/`Shift+Enter` para siguiente/anterior).
+- **Click para navegar menús de consola**: en herramientas de pantalla completa (`git rebase -i`, `fzf`, prompts con lista de opciones) que solo aceptan flechas, Wingdeck detecta la opción resaltada y deja hacer click directo en otra línea — sintetiza las flechas necesarias por vos. No aplica a prompts simples que no usan pantalla completa (ahí seguís usando el teclado, como siempre).
 - **Rutas de archivo clicables**: cualquier ruta que aparezca en la salida de un agente (`src/foo.ts:42`, `C:\...`) se puede abrir directamente en VS Code.
 - **Tamaño de fuente y salto rápido**: `Ctrl+rueda` cambia el tamaño de fuente de una terminal (se recuerda); `Ctrl+1`…`Ctrl+9` salta a la n-ésima terminal según su posición en la grilla.
 - **Scrollback persistente**: el historial de cada terminal sobrevive a reinicios de la app (marcado con un separador "sesión anterior"), usando una serialización limpia del estado visible en vez de reproducir bytes crudos.
@@ -93,6 +94,15 @@ tenés instalados (Claude Code, Qwen Code, OpenCode):
 - Si ya está instalado, un botón abre una terminal nueva con ese CLI listo para que
   inicies sesión vos mismo — **ninguna credencial pasa por Wingdeck**, cada CLI maneja
   su propio login (navegador, API key, etc.) exactamente igual que si lo corrieras a mano.
+- **Graphify**: el mismo asistente detecta si el CLI de [Graphify](#integración-con-graphify-grafo-de-código)
+  está instalado y, si no, te da el comando (`uv tool install graphifyy` + `graphify install`)
+  listo para copiar.
+- **Claves de API (opcional)**: para quien prefiera autenticarse por clave en vez del login
+  por navegador de cada CLI (o quiera correr `graphify extract` en modo headless), el
+  asistente tiene tres campos — Anthropic, OpenAI y Google Gemini. Se guardan solo en este
+  equipo (`%APPDATA%/orq-terminal/settings.json`, nunca en el repo ni en ningún servidor de
+  Wingdeck) y se inyectan como `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY` al
+  abrir cada terminal (no aplica a WSL, que gestiona su propio entorno).
 - Podés repetirlo cuando quieras desde **⚙ Ajustes → "Repetir configuración inicial"**.
 
 ## Instalación

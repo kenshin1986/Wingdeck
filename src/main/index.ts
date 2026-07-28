@@ -21,7 +21,13 @@ import { TemplateStore } from './templates'
 import { WindowStateStore } from './windowState'
 import { WorkspaceBrainStore } from './brain'
 import { analyzeClipboard, cleanupPastes, copyText } from './clipboard'
-import { scanSessions, getInstalled, CLAUDE_QWEN_ID_RE, OPENCODE_ID_RE } from './agentSessions'
+import {
+  scanSessions,
+  getInstalled,
+  checkGraphifyInstalled,
+  CLAUDE_QWEN_ID_RE,
+  OPENCODE_ID_RE
+} from './agentSessions'
 
 // El producto se rebrandeó a "Wingdeck", pero la carpeta de datos de usuario sigue
 // siendo "orq-terminal" para no perder sesiones/cerebros/plantillas ya guardados.
@@ -519,6 +525,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => settings.update(patch))
 
   ipcMain.handle('onboarding:checkClis', () => getInstalled())
+  ipcMain.handle('onboarding:checkGraphify', () => checkGraphifyInstalled())
 
   ipcMain.handle('open:inEditor', (_e, id: string, filePath: string, line?: number) => {
     const session = store.get(id)

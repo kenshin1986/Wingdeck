@@ -73,6 +73,18 @@ export interface AppSettings {
   askOnQuit: boolean
   /** Ya se completó (o descartó) el asistente de configuración inicial */
   onboardingDone: boolean
+  /**
+   * Claves de API opcionales, para agentes/herramientas que soportan autenticarse por
+   * variable de entorno en vez de (o además de) su login por navegador propio. Se
+   * inyectan como env var (ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY) al lanzar
+   * cada terminal — nunca se envían a ningún servidor de Wingdeck, quedan en disco
+   * local (%APPDATA%) igual que el resto de la configuración.
+   */
+  apiKeys: {
+    anthropic?: string
+    openai?: string
+    gemini?: string
+  }
 }
 
 export type PasteContent =

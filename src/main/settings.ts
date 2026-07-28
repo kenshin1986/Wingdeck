@@ -11,7 +11,8 @@ const DEFAULTS: AppSettings = {
   idleAfterMs: 6000,
   persistScrollback: true,
   askOnQuit: true,
-  onboardingDone: false
+  onboardingDone: false,
+  apiKeys: {}
 }
 
 export class SettingsStore {

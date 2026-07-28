@@ -13,6 +13,7 @@ import type {
 } from '../../../shared/types'
 import { AGENT_META, relTime } from '../agents'
 import { useNow } from '../hooks'
+import { useMenuHighlightOverlay } from '../useMenuHighlightOverlay'
 
 const MIN_FONT = 9
 const MAX_FONT = 22
@@ -141,10 +142,15 @@ export function TerminalCard({
   const [resumeOffer, setResumeOffer] = useState<SessionScanResult | null>(null)
   const [otherToolOpen, setOtherToolOpen] = useState(false)
   const [neverAskAgain, setNeverAskAgain] = useState(false)
+  const [activeTerm, setActiveTerm] = useState<Terminal | null>(null)
   const typedSinceMountRef = useRef(false)
   const dragDepth = useRef(0)
   const accent = ACCENTS[session.color % ACCENTS.length]
   const now = useNow()
+  const { rows: menuRows, onRowClick: onMenuRowClick } = useMenuHighlightOverlay(
+    activeTerm,
+    containerRef
+  )
 
   const insertText = (text: string): void => {
     window.orq.write(session.id, text)
@@ -287,6 +293,7 @@ export function TerminalCard({
     termRef.current = term
     fitRef.current = fit
     ;(window.__orqTerms ??= new Map()).set(session.id, term)
+    setActiveTerm(term)
 
     const offData = window.orq.onTermData(session.id, (d) => term.write(d))
     const offExit = window.orq.onTermExit(session.id, (code) => setExited(code))
@@ -388,6 +395,7 @@ export function TerminalCard({
       window.__orqTerms?.delete(session.id)
       term.dispose()
       termRef.current = null
+      setActiveTerm(null)
       // El pty sigue vivo en segundo plano (p. ej. al cambiar de workspace)
       window.orq.detach(session.id)
     }
@@ -561,8 +569,8 @@ export function TerminalCard({
     <div
       id={`card-${session.id}`}
       ref={cardRef}
-      className={`term-card ${exited !== null ? 'is-exited' : ''} ${state === 'attention' ? 'is-attention' : ''} ${highlighted ? 'is-highlight' : ''}`}
-      style={{ borderTopColor: accent }}
+      className={`term-card ${exited !== null ? 'is-exited' : ''} ${state === 'working' ? 'is-working' : ''} ${state === 'attention' ? 'is-attention' : ''} ${highlighted ? 'is-highlight' : ''}`}
+      style={{ '--term-color': accent } as React.CSSProperties}
       onDragEnter={(e) => {
         e.preventDefault()
         dragDepth.current++
@@ -601,10 +609,11 @@ export function TerminalCard({
         {agentMeta && (
           <span
             className="term-agent"
-            style={{ color: agentMeta.color, borderColor: agentMeta.color }}
+            style={{ '--agent-color': agentMeta.color } as React.CSSProperties}
             title={`Agente detectado: ${agentMeta.label}`}
           >
-            {agentMeta.icon} {agentMeta.label}
+            <span className="term-agent-glyph">{agentMeta.icon}</span>
+            {agentMeta.label}
           </span>
         )}
         {descEditing ? (
@@ -636,7 +645,7 @@ export function TerminalCard({
             ● listo
           </span>
         )}
-        <span className="term-shell" style={{ color: accent }}>
+        <span className="term-shell">
           {SHELL_LABELS[session.shell] ?? session.shell}
         </span>
         <span className="term-cwd" title={cwd}>
@@ -814,6 +823,18 @@ export function TerminalCard({
           setCtxMenu({ x: e.clientX, y: e.clientY })
         }}
       />
+      {menuRows.length > 0 && (
+        <div className="menu-click-overlay">
+          {menuRows.map((r) => (
+            <div
+              key={r.bufferY}
+              className="menu-click-row"
+              style={{ top: r.top, height: r.height }}
+              onClick={() => onMenuRowClick(r.bufferY)}
+            />
+          ))}
+        </div>
+      )}
       {ctxMenu && (
         <>
           <div className="ctx-backdrop" onMouseDown={() => setCtxMenu(null)} />
@@ -909,8 +930,9 @@ export function TerminalCard({
               return (
                 <li key={`${s.agent}-${s.id}`} className="term-resume-item">
                   <span className="term-resume-item-info">
-                    <span className="term-agent" style={{ color: meta.color, borderColor: meta.color }}>
-                      {meta.icon} {meta.label}
+                    <span className="term-agent" style={{ '--agent-color': meta.color } as React.CSSProperties}>
+                      <span className="term-agent-glyph">{meta.icon}</span>
+                      {meta.label}
                     </span>
                     <span className="term-resume-item-title" title={s.title}>
                       {s.title}
