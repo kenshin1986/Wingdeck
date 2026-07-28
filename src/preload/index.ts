@@ -119,6 +119,11 @@ const api = {
       if (p.id === id) cb(p.cwd)
     }),
 
+  onModel: (id: string, cb: (model: string) => void): (() => void) =>
+    subscribe<{ id: string; model: string }>('session:model', (p) => {
+      if (p.id === id) cb(p.model)
+    }),
+
   onGitBranch: (id: string, cb: (branch: string | null) => void): (() => void) =>
     subscribe<{ id: string; branch: string | null }>('session:git', (p) => {
       if (p.id === id) cb(p.branch)

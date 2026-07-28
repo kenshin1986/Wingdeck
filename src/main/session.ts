@@ -144,6 +144,22 @@ export class SessionStore {
     }
   }
 
+  updateModel(id: string, model: string): void {
+    const t = this.get(id)
+    if (t && t.model !== model) {
+      t.model = model
+      this.save()
+    }
+  }
+
+  clearModel(id: string): void {
+    const t = this.get(id)
+    if (t && t.model !== undefined) {
+      delete t.model
+      this.save()
+    }
+  }
+
   updateFontSize(id: string, fontSize: number): void {
     const t = this.get(id)
     if (t) {

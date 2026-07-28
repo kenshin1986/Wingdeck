@@ -836,6 +836,18 @@ body {
   flex-shrink: 0;
 }
 
+.term-model {
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-soft);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .term-stats {
   color: var(--text-faint);
   font-size: 10.5px;

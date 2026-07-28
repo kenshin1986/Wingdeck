@@ -31,6 +31,8 @@ export interface TerminalSession {
   description?: string
   /** 'never' = no ofrecer más el overlay de "retomar sesión" en esta terminal */
   resumeOverlay?: 'auto' | 'never'
+  /** Modelo activo detectado en la salida del pty (best-effort, ver modelDetect.ts) */
+  model?: string
 }
 
 export interface WorkspacesInfo {

@@ -10,6 +10,7 @@ import type { ActivityTracker } from './activity'
 import type { WorkspaceBrainStore } from './brain'
 import { branchFor } from './git'
 import { hasAnyHistoryHint } from './agentSessions'
+import { detectModel } from './modelDetect'
 
 const MAX_BUFFER = 300_000
 const PERSIST_INTERVAL_MS = 15_000
@@ -23,6 +24,8 @@ interface Entry {
   pty: IPty | null
   buffer: string
   parseTail: string
+  /** Cola rolling para detectModel, independiente de parseTail (cwd) */
+  modelTail: string
   attached: boolean
   /** Se dispara en el primer prompt del shell (para el comando de arranque) */
   onFirstPrompt?: () => void
@@ -240,6 +243,7 @@ export class PtyManager {
           pty: null,
           buffer: persisted + RESUME_BANNER,
           parseTail: '',
+          modelTail: '',
           attached: false,
           oscState: 0,
           dirty: false
@@ -268,6 +272,7 @@ export class PtyManager {
       pty,
       buffer: this.entries.get(session.id)?.buffer ?? '',
       parseTail: '',
+      modelTail: '',
       attached: this.entries.get(session.id)?.attached ?? false,
       oscState: 0,
       dirty: false
@@ -300,6 +305,7 @@ export class PtyManager {
       if (entry.buffer.length > MAX_BUFFER) entry.buffer = entry.buffer.slice(-MAX_BUFFER)
       entry.dirty = true
       this.parseCwd(session.id, entry, data)
+      this.parseModel(session.id, entry, data)
       this.activity.onOutput(session.id, this.scanBel(entry, data))
       if (entry.attached) {
         this.getWebContents()?.send('term:data', { id: session.id, data })
@@ -402,6 +408,24 @@ export class PtyManager {
     }
   }
 
+  /**
+   * Detección best-effort del modelo activo (Sonnet/Opus/etc., o `provider/model` de
+   * opencode) escaneando la salida cruda del pty — no hay canal OSC dedicado a esto
+   * como con el cwd, así que esto puede fallar entre versiones de las CLIs (ver
+   * modelDetect.ts).
+   */
+  private parseModel(id: string, entry: Entry, chunk: string): void {
+    const text = (entry.modelTail + chunk).slice(-4000)
+    entry.modelTail = text.slice(-1024)
+    const detected = detectModel(text)
+    if (!detected) return
+    const session = this.store.get(id)
+    if (session && session.model !== detected.label) {
+      this.store.updateModel(id, detected.label)
+      this.getWebContents()?.send('session:model', { id, model: detected.label })
+    }
+  }
+
   /** Deja de emitir datos en vivo (el pty sigue vivo y acumulando buffer) */
   detach(id: string): void {
     const entry = this.entries.get(id)
@@ -478,6 +502,10 @@ export class PtyManager {
     }
     if (entry) entry.buffer = ''
     this.deletePersisted(id)
+    if (session.model !== undefined) {
+      this.store.clearModel(id)
+      this.getWebContents()?.send('session:model', { id, model: '' })
+    }
     this.spawnFor(session, cols, rows)
   }
 

@@ -124,6 +124,7 @@ export function TerminalCard({
   const [exited, setExited] = useState<number | null>(null)
   const [cwd, setCwd] = useState(session.cwd)
   const [branch, setBranch] = useState<string | null>(null)
+  const [model, setModel] = useState(session.model)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(session.title)
   const [descEditing, setDescEditing] = useState(false)
@@ -298,6 +299,7 @@ export function TerminalCard({
     const offData = window.orq.onTermData(session.id, (d) => term.write(d))
     const offExit = window.orq.onTermExit(session.id, (code) => setExited(code))
     const offCwd = window.orq.onCwd(session.id, setCwd)
+    const offModel = window.orq.onModel(session.id, setModel)
     const offBranch = window.orq.onGitBranch(session.id, setBranch)
     // OJO: term.onData dispara tanto por tecleo real como por respuestas AUTOMÁTICAS
     // de xterm.js a secuencias de protocolo del propio shell (consultas de
@@ -389,6 +391,7 @@ export function TerminalCard({
       offData()
       offExit()
       offCwd()
+      offModel()
       offBranch()
       dataSub.dispose()
       selSub.dispose()
@@ -614,6 +617,14 @@ export function TerminalCard({
           >
             <span className="term-agent-glyph">{agentMeta.icon}</span>
             {agentMeta.label}
+          </span>
+        )}
+        {model && (
+          <span
+            className="term-model"
+            title={`Modelo detectado (best-effort): ${model}`}
+          >
+            {model}
           </span>
         )}
         {descEditing ? (
