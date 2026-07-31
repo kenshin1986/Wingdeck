@@ -23,6 +23,41 @@ function subscribe<T>(channel: string, handler: (payload: T) => void): () => voi
   return () => ipcRenderer.removeListener(channel, listener)
 }
 
+/**
+ * Router delegado para canales dirigidos a UNA terminal: un único ipcRenderer.on
+ * por canal con un Map id→callbacks, en vez de un listener global por tarjeta
+ * que filtra por id (con N tarjetas, cada mensaje se despachaba N veces).
+ * Set (no callback único) por el doble mount de React StrictMode.
+ */
+function makeRouter<T extends { id: string }>(
+  channel: string
+): (id: string, cb: (payload: T) => void) => () => void {
+  const subs = new Map<string, Set<(payload: T) => void>>()
+  ipcRenderer.on(channel, (_e, payload: T) => {
+    const set = subs.get(payload.id)
+    if (set) for (const cb of set) cb(payload)
+  })
+  return (id, cb) => {
+    let set = subs.get(id)
+    if (!set) {
+      set = new Set()
+      subs.set(id, set)
+    }
+    set.add(cb)
+    return () => {
+      set.delete(cb)
+      if (set.size === 0) subs.delete(id)
+    }
+  }
+}
+
+const onTermDataRouted = makeRouter<{ id: string; data: string; epoch: number }>('term:data')
+const onTermExitRouted = makeRouter<{ id: string; code: number }>('term:exit')
+const onCwdRouted = makeRouter<{ id: string; cwd: string }>('session:cwd')
+const onModelRouted = makeRouter<{ id: string; model: string }>('session:model')
+const onGitRouted = makeRouter<{ id: string; branch: string | null }>('session:git')
+const onOfferRouted = makeRouter<{ id: string; result: SessionScanResult }>('sessions:offer')
+
 const api = {
   init: (): Promise<InitPayload> => ipcRenderer.invoke('app:init'),
 
@@ -33,11 +68,16 @@ const api = {
     title?: string
   }): Promise<TerminalSession> => ipcRenderer.invoke('term:create', opts),
 
-  attach: (id: string, cols: number, rows: number): Promise<string> =>
+  attach: (id: string, cols: number, rows: number): Promise<{ buffer: string; epoch: number }> =>
     ipcRenderer.invoke('term:attach', id, cols, rows),
 
   write: (id: string, data: string): void => {
     ipcRenderer.send('term:input', id, data)
+  },
+
+  /** ACK de flow control: el xterm ya parseó `chars` del epoch indicado */
+  ackData: (id: string, chars: number, epoch: number): void => {
+    ipcRenderer.send('term:ack', id, chars, epoch)
   },
 
   resize: (id: string, cols: number, rows: number): void => {
@@ -104,30 +144,20 @@ const api = {
 
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickFolder'),
 
-  onTermData: (id: string, cb: (data: string) => void): (() => void) =>
-    subscribe<{ id: string; data: string }>('term:data', (p) => {
-      if (p.id === id) cb(p.data)
-    }),
+  onTermData: (id: string, cb: (data: string, epoch: number) => void): (() => void) =>
+    onTermDataRouted(id, (p) => cb(p.data, p.epoch)),
 
   onTermExit: (id: string, cb: (code: number) => void): (() => void) =>
-    subscribe<{ id: string; code: number }>('term:exit', (p) => {
-      if (p.id === id) cb(p.code)
-    }),
+    onTermExitRouted(id, (p) => cb(p.code)),
 
   onCwd: (id: string, cb: (cwd: string) => void): (() => void) =>
-    subscribe<{ id: string; cwd: string }>('session:cwd', (p) => {
-      if (p.id === id) cb(p.cwd)
-    }),
+    onCwdRouted(id, (p) => cb(p.cwd)),
 
   onModel: (id: string, cb: (model: string) => void): (() => void) =>
-    subscribe<{ id: string; model: string }>('session:model', (p) => {
-      if (p.id === id) cb(p.model)
-    }),
+    onModelRouted(id, (p) => cb(p.model)),
 
   onGitBranch: (id: string, cb: (branch: string | null) => void): (() => void) =>
-    subscribe<{ id: string; branch: string | null }>('session:git', (p) => {
-      if (p.id === id) cb(p.branch)
-    }),
+    onGitRouted(id, (p) => cb(p.branch)),
 
   onResources: (cb: (snap: ResourceSnapshot) => void): (() => void) =>
     subscribe<ResourceSnapshot>('res:update', cb),
@@ -188,9 +218,7 @@ const api = {
     ipcRenderer.send('sessions:dismiss', id, neverAgain)
   },
   onSessionsOffer: (id: string, cb: (result: SessionScanResult) => void): (() => void) =>
-    subscribe<{ id: string; result: SessionScanResult }>('sessions:offer', (p) => {
-      if (p.id === id) cb(p.result)
-    })
+    onOfferRouted(id, (p) => cb(p.result))
 }
 
 export type OrqApi = typeof api

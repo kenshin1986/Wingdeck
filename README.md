@@ -4,6 +4,9 @@ Orquestador visual de terminales y flotas de agentes IA para Windows. Organiza m
 consolas en un lienzo libre (arrastrar y redimensionar), con sesiones persistentes que
 recuerdan la carpeta de trabajo, el título y la posición de cada terminal entre reinicios.
 
+📖 **[Guía de uso completa](docs/GUIA_DE_USO.md)** — recorrido paso a paso de todas las
+funciones, desde crear tu primera terminal hasta orquestar una flota de agentes.
+
 ## Características
 
 - **Multi-shell**: PowerShell 7, Windows PowerShell, CMD, Git Bash y WSL (se detectan automáticamente).
@@ -12,7 +15,8 @@ recuerdan la carpeta de trabajo, el título y la posición de cada terminal entr
 - **Workspaces con nombre**: agrupa terminales por proyecto (selector `▣` en la barra superior). Al cambiar de workspace las terminales siguen vivas en segundo plano y recuperan su pantalla al volver.
 - **Comando de arranque** (⚡ en cada terminal): se ejecuta automáticamente al abrir o restaurar esa terminal (p. ej. `npm run dev`), disparado cuando el shell muestra su primer prompt.
 - **Monitoreo de recursos**: CPU y RAM del sistema en la barra superior, y consumo por terminal (árbol de procesos completo de cada shell).
-- **Rendimiento**: renderizado WebGL en cada terminal.
+- **Rendimiento**: renderizado WebGL en cada terminal, con control de flujo entre cada terminal y la ventana (evita que una salida muy intensa en varias terminales a la vez sature la app, incluso con muchos workspaces abiertos).
+- **Detección de modelo activo**: si el agente de la terminal expone qué modelo está usando (Claude Code, OpenCode), un chip junto al cwd lo muestra y se actualiza solo al cambiar de modelo (p. ej. con `/model`).
 
 ### Modo orquestador de agentes IA (Claude Code, Qwen Code, OpenCode)
 
@@ -82,6 +86,7 @@ lee (sin ejecutar ningún CLI) y te las ofrece para no repetir `claude` → espe
 
 - **Automático**: al abrir una terminal en una carpeta con historial de agentes, aparece un panel con las sesiones previas (agente, título, hace cuánto) y las opciones **Retomar**, **Nueva con \<agente\>**, **Otra herramienta ▾** o **Cerrar**. Mientras decidís, el comando de arranque (⚡) queda en pausa — nunca se escribe nada hasta que elegís, así que jamás se manda por error dentro de un agente ya corriendo.
 - **Manual**: menú contextual (clic derecho) → "Sesiones anteriores…", disponible en cualquier terminal en cualquier momento.
+- **Por terminal, no por carpeta**: si tenés varias terminales abiertas en la misma carpeta, cada una recuerda solo las sesiones que ella misma retomó o creó — no te ofrece (ni deja elegir por error) una sesión que ya está viva en otra de tus terminales. Una terminal que todavía no trabajó con ningún agente en esa carpeta ve el historial completo, como siempre; apenas retoma o crea una, esa sesión pasa a ser suya.
 - **"No volver a preguntar en esta terminal"**: se recuerda por terminal (reversible: basta con usar la entrada manual de nuevo).
 - No se piden sesiones para terminales WSL en esta versión.
 

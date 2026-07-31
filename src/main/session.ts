@@ -2,6 +2,8 @@ import { app } from 'electron'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import type {
+  AgentKind,
+  OwnedAgentSession,
   TerminalSession,
   TermLayout,
   WorkspacesInfo,
@@ -20,6 +22,8 @@ interface SessionFileV2 {
 }
 
 const DEFAULT_WS = 'General'
+/** Máximo de sesiones de agente asociadas que se recuerdan por terminal */
+const MAX_OWNED_SESSIONS = 20
 
 export class SessionStore {
   private file: string
@@ -176,6 +180,48 @@ export class SessionStore {
       else delete t.description
       this.save()
     }
+  }
+
+  /**
+   * Asocia una sesión de agente a esta terminal. Si otra terminal ya la tenía
+   * (p. ej. se retomó acá una sesión ajena), la propiedad se transfiere.
+   */
+  claimAgentSession(termId: string, agent: AgentKind, sessionId: string): void {
+    const target = this.get(termId)
+    if (!target) return
+    for (const ws of Object.values(this.data.workspaces)) {
+      for (const t of ws.terminals) {
+        if (t.id === termId || !t.agentSessions) continue
+        const rest = t.agentSessions.filter((s) => !(s.agent === agent && s.id === sessionId))
+        if (rest.length !== t.agentSessions.length) {
+          if (rest.length > 0) t.agentSessions = rest
+          else delete t.agentSessions
+        }
+      }
+    }
+    const rest = (target.agentSessions ?? []).filter(
+      (s) => !(s.agent === agent && s.id === sessionId)
+    )
+    target.agentSessions = [{ agent, id: sessionId, at: Date.now() }, ...rest].slice(
+      0,
+      MAX_OWNED_SESSIONS
+    )
+    this.save()
+  }
+
+  /** Terminal dueña de esa sesión de agente, o null si nadie la reclamó */
+  ownerOf(agent: AgentKind, sessionId: string): string | null {
+    for (const ws of Object.values(this.data.workspaces)) {
+      for (const t of ws.terminals) {
+        if (t.agentSessions?.some((s) => s.agent === agent && s.id === sessionId)) return t.id
+      }
+    }
+    return null
+  }
+
+  /** Sesiones de agente asociadas a la terminal (más reciente primero) */
+  ownedSessionsOf(termId: string): OwnedAgentSession[] {
+    return this.get(termId)?.agentSessions ?? []
   }
 
   setResumeOverlay(id: string, mode: 'auto' | 'never'): void {

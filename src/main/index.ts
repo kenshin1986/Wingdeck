@@ -6,8 +6,10 @@ import { homedir } from 'os'
 import type {
   ActivityEvent,
   AgentKind,
+  AgentSessionRef,
   AppSettings,
   InitPayload,
+  SessionScanResult,
   ShellKind,
   TermLayout
 } from '../shared/types'
@@ -136,6 +138,17 @@ function createWindow(): void {
   })
 
   if (windowState.wasMaximized()) win.maximize()
+
+  // Sin esto, Chromium throttlea los setTimeout de xterm a ~1/s con la ventana
+  // minimizada/oculta → los ACKs del flow control llegarían lentísimos y los
+  // agentes quedarían casi pausados en segundo plano (el caso de uso central).
+  win.webContents.setBackgroundThrottling(false)
+  // Si el renderer muere/crashea o navega/recarga (Ctrl+R), ningún cleanup de
+  // React corrió: despausar todos los ptys y marcar todo como detached para que
+  // nada quede colgado esperando ACKs que ya no llegarán. Las cards del renderer
+  // nuevo re-attachean al montar.
+  win.webContents.on('render-process-gone', () => ptys?.resetFlowAll())
+  win.webContents.on('did-start-loading', () => ptys?.resetFlowAll())
 
   win.on('ready-to-show', () => win?.show())
   win.on('focus', () => win?.flashFrame(false))
@@ -326,6 +339,111 @@ function dispatchQueue(id: string): boolean {
 /** Cortafuegos: la terminal nunca queda colgada esperando una decisión que no llega */
 const SESSION_SCAN_TIMEOUT_MS = 3000
 
+// ── Asociación terminal ↔ sesiones de agente ─────────────────────────────────
+
+/**
+ * Filtra un escaneo de sesiones a las PROPIAS de la terminal. Sin propias (o si
+ * ninguna de las propias sigue existiendo en disco), cae a la lista completa del
+ * cwd — así el historial previo a esta feature sigue accesible y se va
+ * repartiendo solo a medida que cada terminal retoma/crea sesiones.
+ */
+function sessionsFor(termId: string, result: SessionScanResult): SessionScanResult {
+  const owned = store.ownedSessionsOf(termId)
+  if (owned.length === 0) return result
+  const keys = new Set(owned.map((o) => `${o.agent}:${o.id}`))
+  const mine = result.sessions.filter((s) => keys.has(`${s.agent}:${s.id}`))
+  return mine.length > 0 ? { ...result, sessions: mine } : result
+}
+
+/**
+ * Vigía de "sesión nueva": cuando arranca un agente en una terminal, se espera a
+ * que aparezca su sesión en disco (el CLI la crea al ratito) y se reclama para
+ * esa terminal. Cubre Claude/Qwen/OpenCode con el mismo mecanismo (scanSessions).
+ */
+interface ClaimWatch {
+  termId: string
+  cwd: string
+  agent: AgentKind
+  startedAt: number
+  timer: NodeJS.Timeout
+}
+const claimWatches = new Map<string, ClaimWatch>()
+const CLAIM_POLL_MS = 10_000
+const CLAIM_TIMEOUT_MS = 180_000
+/** Margen: el archivo de sesión puede nacer un poco antes de que el monitor detecte el agente */
+const CLAIM_SLACK_MS = 15_000
+
+function startClaimWatch(termId: string, agent: AgentKind): void {
+  const session = store.get(termId)
+  if (!session) return
+  stopClaimWatch(termId)
+  const watch: ClaimWatch = {
+    termId,
+    cwd: session.cwd,
+    agent,
+    startedAt: Date.now(),
+    timer: setInterval(() => void pollClaim(watch), CLAIM_POLL_MS)
+  }
+  claimWatches.set(termId, watch)
+}
+
+function stopClaimWatch(termId: string): void {
+  const w = claimWatches.get(termId)
+  if (w) {
+    clearInterval(w.timer)
+    claimWatches.delete(termId)
+  }
+}
+
+/**
+ * Nacimiento de la sesión: birthtime del archivo (o time_created de la DB). El
+ * mtime NO sirve para decidir si es "nueva": una sesión externa viva en el mismo
+ * cwd (p. ej. un Claude Code corriendo fuera de Wingdeck) también tiene mtime
+ * fresco, y el watch se la apropiaría por error — verificado en E2E real.
+ */
+function sessionBornAt(s: AgentSessionRef): number | null {
+  return s.createdAt ?? null
+}
+
+/**
+ * Si varias terminales del mismo cwd vigilan a la vez, cada sesión nueva se la
+ * lleva la vigía cuyo arranque quedó más cerca (por debajo) de su creación.
+ */
+function bestWatcherFor(s: AgentSessionRef, cwd: string): string | null {
+  const born = sessionBornAt(s)
+  if (born === null) return null
+  let best: ClaimWatch | null = null
+  for (const w of claimWatches.values()) {
+    if (w.agent !== s.agent || w.cwd !== cwd) continue
+    if (w.startedAt - CLAIM_SLACK_MS > born) continue
+    if (!best || w.startedAt > best.startedAt) best = w
+  }
+  return best?.termId ?? null
+}
+
+async function pollClaim(watch: ClaimWatch): Promise<void> {
+  if (Date.now() - watch.startedAt > CLAIM_TIMEOUT_MS) {
+    stopClaimWatch(watch.termId)
+    return
+  }
+  try {
+    const result = await scanSessions(watch.cwd)
+    const candidates = result.sessions.filter((s) => {
+      if (s.agent !== watch.agent || store.ownerOf(s.agent, s.id) !== null) return false
+      // Solo sesiones NACIDAS después del arranque del agente en esta terminal;
+      // sin fecha de creación no hay forma segura de atribuir — no se reclama.
+      const born = sessionBornAt(s)
+      return born !== null && born >= watch.startedAt - CLAIM_SLACK_MS
+    })
+    const mine = candidates.filter((s) => bestWatcherFor(s, watch.cwd) === watch.termId)
+    if (mine.length === 0) return
+    store.claimAgentSession(watch.termId, mine[0].agent, mine[0].id)
+    stopClaimWatch(watch.termId)
+  } catch {
+    /* best-effort: el próximo poll reintenta */
+  }
+}
+
 /**
  * Se llama cuando `ptys` retiene un arranque en un cold spawn elegible. Escanea las
  * sesiones previas de ese cwd; si encuentra alguna, ofrece el overlay al renderer y
@@ -345,12 +463,14 @@ function handleColdSpawnEligible(id: string, cwd: string): void {
     .then((result) => {
       if (settled) return
       clearTimeout(timer)
-      if (result.sessions.length === 0) {
+      // Solo ofrecer las sesiones que corresponden a ESTA terminal
+      const forTerm = sessionsFor(id, result)
+      if (forTerm.sessions.length === 0) {
         releaseNow()
         return
       }
       settled = true
-      win?.webContents.send('sessions:offer', { id, result })
+      win?.webContents.send('sessions:offer', { id, result: forTerm })
     })
     .catch((err) => {
       console.error('[sessions] escaneo falló, se libera el arranque normal:', err)
@@ -376,6 +496,9 @@ function agentIsRunning(id: string): boolean {
 }
 
 function registerIpc(): void {
+  // OJO: app:init debe seguir siendo un getter puro — las pruebas E2E (y cualquier
+  // consumidor extra) lo llaman para leer el estado, y un reset acá desengancharía
+  // terminales vivas sin re-attach. El reset por recarga vive en did-start-loading.
   ipcMain.handle('app:init', (): InitPayload => {
     return {
       shells: detectShells(),
@@ -403,7 +526,10 @@ function registerIpc(): void {
 
   ipcMain.handle('ws:delete', (_e, name: string) => {
     const killedIds = store.deleteWorkspace(name)
-    for (const id of killedIds) ptys.kill(id)
+    for (const id of killedIds) {
+      stopClaimWatch(id)
+      ptys.kill(id)
+    }
     brain.delete(name)
     return { terminals: store.terminals, workspaces: store.workspacesInfo }
   })
@@ -427,11 +553,17 @@ function registerIpc(): void {
     try {
       return ptys.attach(id, cols, rows)
     } catch (err) {
-      return `\r\n\x1b[31m[Wingdeck] No se pudo iniciar la terminal: ${String(err)}\x1b[0m\r\n`
+      // epoch 0 nunca coincide con una entry viva (attach/spawn siempre lo suben
+      // a ≥1), así que el ACK del replay de este mensaje de error se ignora solo.
+      return {
+        buffer: `\r\n\x1b[31m[Wingdeck] No se pudo iniciar la terminal: ${String(err)}\x1b[0m\r\n`,
+        epoch: 0
+      }
     }
   })
 
   ipcMain.on('term:input', (_e, id: string, data: string) => ptys.write(id, data))
+  ipcMain.on('term:ack', (_e, id: string, chars: number, epoch: number) => ptys.ack(id, chars, epoch))
   ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
 
   ipcMain.handle('term:restart', (_e, id: string, cols: number, rows: number) => {
@@ -439,6 +571,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('term:close', (_e, id: string) => {
+    stopClaimWatch(id)
     ptys.kill(id)
     store.remove(id)
   })
@@ -454,7 +587,7 @@ function registerIpc(): void {
   ipcMain.handle('sessions:list', async (_e, id: string) => {
     const session = store.get(id)
     if (!session) return { cwd: '', sessions: [], installed: {}, scannedAt: Date.now() }
-    return scanSessions(session.cwd)
+    return sessionsFor(id, await scanSessions(session.cwd))
   })
 
   ipcMain.handle(
@@ -470,6 +603,8 @@ function registerIpc(): void {
       const sameBinary = original && firstWord(original) === agent
       const cmd = sameBinary ? `${original} ${flag} ${sessionId}` : `${agent} ${flag} ${sessionId}`
       const ok = ptys.releaseStartup(id, cmd)
+      // Retomarla acá la vuelve propia de esta terminal (transfiere si era de otra)
+      if (ok) store.claimAgentSession(id, agent, sessionId)
       return { ok }
     }
   )
@@ -479,6 +614,8 @@ function registerIpc(): void {
     if (!session) return { ok: false, error: 'not-found' as const }
     if (agentIsRunning(id)) return { ok: false, error: 'agent-running' as const }
     const ok = agent === null ? ptys.releaseStartup(id) : ptys.releaseStartup(id, agent)
+    // La sesión que este agente cree al arrancar será de esta terminal
+    if (ok && agent) startClaimWatch(id, agent)
     return { ok }
   })
 
@@ -635,7 +772,11 @@ app.whenReady().then(() => {
     (snap) => {
       for (const [id, stats] of Object.entries(snap.terminals)) {
         tracker.updateCpu(id, stats.cpu)
+        const prevAgent = lastAgents.get(id) ?? null
         lastAgents.set(id, stats.agent)
+        // Arrancó un agente en esta terminal (por startupCmd, resume o tecleo
+        // manual): vigilar la aparición de su sesión en disco para asociarla.
+        if (stats.agent && stats.agent !== prevAgent) startClaimWatch(id, stats.agent)
         checkCpuAlert(id, stats.cpu, snap.global.cores)
       }
       win?.webContents.send('res:update', snap)

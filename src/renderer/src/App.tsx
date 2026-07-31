@@ -317,6 +317,12 @@ export default function App(): React.JSX.Element {
     )
   }, [])
 
+  const updateTerminalModel = useCallback((id: string, model: string) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, model: model || undefined } : s))
+    )
+  }, [])
+
   const onLayoutChange = useCallback((next: Layout) => {
     const items = next.map((l) => ({ i: l.i, x: l.x, y: l.y, w: l.w, h: l.h, minW: 5, minH: 7 }))
     setLayout(items)
@@ -395,6 +401,7 @@ export default function App(): React.JSX.Element {
                   onRename={(title) => renameTerminal(s.id, title)}
                   onDescriptionChange={(text) => updateTerminalDescription(s.id, text)}
                   onStartupCmdChange={(cmd) => updateTerminalStartupCmd(s.id, cmd)}
+                  onModelChange={(model) => updateTerminalModel(s.id, model)}
                   onToggleFocus={() => setFocusId((cur) => (cur === s.id ? null : s.id))}
                 />
               </div>

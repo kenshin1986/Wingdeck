@@ -15,6 +15,26 @@ import { detectModel } from './modelDetect'
 const MAX_BUFFER = 300_000
 const PERSIST_INTERVAL_MS = 15_000
 const GIT_POLL_MS = 10_000
+/**
+ * Flow control pty→renderer (estilo VS Code): sin esto, si los agentes producen
+ * salida más rápido de lo que el renderer puede parsear, los mensajes `term:data`
+ * sin entregar se acumulan SIN LÍMITE en el proceso main (observado: >10GB) y el
+ * eco del tecleo queda detrás del backlog — todas las consolas parecen muertas.
+ * Con más de HIGH_WATER chars sin ACKear se pausa el pty; se reanuda bajo LOW_WATER.
+ */
+const HIGH_WATER = 100_000
+const LOW_WATER = 5_000
+/** Coalescing del send: junta chunks ~5ms (o hasta FLUSH_MAX) antes de emitir */
+const FLUSH_MS = 5
+const FLUSH_MAX = 65_536
+/**
+ * Válvula de seguridad: si una pausa dura más que esto (ACK perdido — el canal
+ * term:ack es send-and-forget, sin garantía de entrega), se auto-reanuda. Un ACK
+ * perdido pasa de "terminal congelada para siempre" a un hipo de 5s; y con un
+ * renderer genuinamente colgado el goteo queda acotado (~HIGH_WATER cada 5s),
+ * nada que ver con el crecimiento sin límite del bug original.
+ */
+const PAUSE_GUARD_MS = 5_000
 const RESUME_BANNER = '\r\n\x1b[2m── sesión anterior ──\x1b[0m\r\n'
 const CWD_RE = /\x1b\]9;9;([^\x07\x1b]*)(?:\x07|\x1b\\)/g
 // eslint-disable-next-line no-control-regex
@@ -27,6 +47,17 @@ interface Entry {
   /** Cola rolling para detectModel, independiente de parseTail (cwd) */
   modelTail: string
   attached: boolean
+  /** Chars enviados al renderer aún sin ACKear (flow control) */
+  unackedChars: number
+  /** Generación de flow: los ACKs de una card/spawn anterior traen un epoch viejo y se ignoran */
+  flowEpoch: number
+  /** Salida pendiente de coalescer en el próximo flush */
+  pendingOut: string
+  flushTimer: NodeJS.Timeout | null
+  /** El pty está pausado por exceso de unackedChars */
+  flowPaused: boolean
+  /** Auto-resume si la pausa dura demasiado (ACK perdido) */
+  pauseGuard: NodeJS.Timeout | null
   /** Se dispara en el primer prompt del shell (para el comando de arranque) */
   onFirstPrompt?: () => void
   /** Estado del escáner de BEL: 0=normal 1=ESC 2=en OSC 3=en OSC tras ESC */
@@ -229,12 +260,13 @@ export class PtyManager {
   }
 
   /**
-   * Garantiza que exista un pty para la sesión y devuelve el buffer acumulado.
-   * A partir de aquí los datos también se emiten en vivo al renderer.
+   * Garantiza que exista un pty para la sesión y devuelve el buffer acumulado
+   * más el epoch de flow control vigente (para ACKear contra la generación
+   * correcta). A partir de aquí los datos también se emiten en vivo al renderer.
    */
-  attach(id: string, cols: number, rows: number): string {
+  attach(id: string, cols: number, rows: number): { buffer: string; epoch: number } {
     const session = this.store.get(id)
-    if (!session) return ''
+    if (!session) return { buffer: '', epoch: 0 }
     let entry = this.entries.get(id)
     if (!entry) {
       const persisted = this.getSettings().persistScrollback ? this.loadPersisted(id) : null
@@ -245,6 +277,12 @@ export class PtyManager {
           parseTail: '',
           modelTail: '',
           attached: false,
+          unackedChars: 0,
+          flowEpoch: 0,
+          pendingOut: '',
+          flushTimer: null,
+          flowPaused: false,
+          pauseGuard: null,
           oscState: 0,
           dirty: false
         })
@@ -255,7 +293,15 @@ export class PtyManager {
       entry = this.spawnFor(session, cols, rows)
     }
     entry.attached = true
-    return entry.buffer
+    // Generación nueva: descarta restos/ACKs de la card anterior y cuenta el
+    // replay contra el flow control — un cambio de workspace con N replays de
+    // 300KB pausa cada pty hasta que SU card terminó de parsear su replay.
+    this.resetFlow(entry)
+    entry.unackedChars = entry.buffer.length
+    if (entry.unackedChars > HIGH_WATER && entry.pty) {
+      this.pauseFlow(id, entry)
+    }
+    return { buffer: entry.buffer, epoch: entry.flowEpoch }
   }
 
   private spawnFor(session: TerminalSession, cols: number, rows: number): Entry {
@@ -268,12 +314,20 @@ export class PtyManager {
       env: env as { [key: string]: string }
     })
 
+    const prev = this.entries.get(session.id)
     const entry: Entry = {
       pty,
-      buffer: this.entries.get(session.id)?.buffer ?? '',
+      buffer: prev?.buffer ?? '',
       parseTail: '',
       modelTail: '',
-      attached: this.entries.get(session.id)?.attached ?? false,
+      attached: prev?.attached ?? false,
+      unackedChars: 0,
+      // Generación nueva: cualquier ACK dirigido al spawn anterior se ignora
+      flowEpoch: (prev?.flowEpoch ?? 0) + 1,
+      pendingOut: '',
+      flushTimer: null,
+      flowPaused: false,
+      pauseGuard: null,
       oscState: 0,
       dirty: false
     }
@@ -307,8 +361,14 @@ export class PtyManager {
       this.parseCwd(session.id, entry, data)
       this.parseModel(session.id, entry, data)
       this.activity.onOutput(session.id, this.scanBel(entry, data))
-      if (entry.attached) {
-        this.getWebContents()?.send('term:data', { id: session.id, data })
+      // Detached: no se acumula pendingOut ni se pausa nunca (invariante: un pty
+      // sin card montada jamás queda pausado — sus ACKs no llegarían).
+      if (!entry.attached) return
+      entry.pendingOut += data
+      if (entry.pendingOut.length >= FLUSH_MAX) {
+        this.flushOut(session.id, entry)
+      } else if (!entry.flushTimer) {
+        entry.flushTimer = setTimeout(() => this.flushOut(session.id, entry), FLUSH_MS)
       }
     })
 
@@ -319,6 +379,8 @@ export class PtyManager {
       // nuevo ya está vivo), no avisar "proceso finalizado" — sería para el pty VIEJO,
       // no para el que el usuario está viendo ahora.
       if (this.entries.get(session.id) === entry) {
+        // Que el último output pendiente llegue antes del aviso de salida
+        this.flushOut(session.id, entry)
         this.getWebContents()?.send('term:exit', { id: session.id, code: exitCode })
       }
     })
@@ -426,10 +488,103 @@ export class PtyManager {
     }
   }
 
+  /** Emite el pendiente coalescido y pausa el pty si hay demasiado sin ACKear */
+  private flushOut(id: string, entry: Entry): void {
+    if (entry.flushTimer) {
+      clearTimeout(entry.flushTimer)
+      entry.flushTimer = null
+    }
+    // Entry reemplazada por un respawn, card desmontada o nada pendiente
+    if (this.entries.get(id) !== entry || !entry.attached || !entry.pendingOut) return
+    const data = entry.pendingOut
+    entry.pendingOut = ''
+    entry.unackedChars += data.length
+    this.getWebContents()?.send('term:data', { id, data, epoch: entry.flowEpoch })
+    if (!entry.flowPaused && entry.unackedChars > HIGH_WATER && entry.pty) {
+      this.pauseFlow(id, entry)
+    }
+  }
+
+  /** Pausa el pty y arma la válvula de auto-resume por si el ACK se pierde */
+  private pauseFlow(id: string, entry: Entry): void {
+    entry.flowPaused = true
+    try {
+      entry.pty?.pause()
+    } catch {
+      /* pty muerto */
+    }
+    if (entry.pauseGuard) clearTimeout(entry.pauseGuard)
+    entry.pauseGuard = setTimeout(() => {
+      entry.pauseGuard = null
+      if (this.entries.get(id) !== entry || !entry.flowPaused) return
+      console.error(`[ptys] pausa de ${id} sin ACK tras ${PAUSE_GUARD_MS}ms — auto-resume`)
+      entry.unackedChars = 0
+      this.resumeFlow(entry)
+    }, PAUSE_GUARD_MS)
+  }
+
+  private resumeFlow(entry: Entry): void {
+    entry.flowPaused = false
+    if (entry.pauseGuard) {
+      clearTimeout(entry.pauseGuard)
+      entry.pauseGuard = null
+    }
+    try {
+      entry.pty?.resume()
+    } catch {
+      /* pty muerto */
+    }
+  }
+
+  /** ACK del renderer: ya parseó `chars` del epoch indicado */
+  ack(id: string, chars: number, epoch: number): void {
+    const entry = this.entries.get(id)
+    // ACK huérfano (card o spawn anterior): la generación no coincide, ignorar
+    if (!entry || epoch !== entry.flowEpoch || !Number.isFinite(chars)) return
+    entry.unackedChars = Math.max(0, entry.unackedChars - chars)
+    if (entry.flowPaused && entry.unackedChars < LOW_WATER) {
+      this.resumeFlow(entry)
+    }
+  }
+
+  /** Descarta pendientes, invalida ACKs en vuelo (epoch++) y despausa el pty */
+  private resetFlow(entry: Entry): void {
+    if (entry.flushTimer) {
+      clearTimeout(entry.flushTimer)
+      entry.flushTimer = null
+    }
+    entry.pendingOut = ''
+    entry.unackedChars = 0
+    entry.flowEpoch++
+    if (entry.pauseGuard) {
+      clearTimeout(entry.pauseGuard)
+      entry.pauseGuard = null
+    }
+    if (entry.flowPaused) {
+      this.resumeFlow(entry)
+    }
+  }
+
+  /**
+   * Desengancha todas las terminales y resetea su flow control. Para cuando el
+   * renderer se recarga o muere: los cleanups de React nunca corrieron, así que
+   * habría entries con attached=true (y ptys posiblemente pausados esperando
+   * ACKs que ya no llegarán jamás).
+   */
+  resetFlowAll(): void {
+    for (const [, entry] of this.entries) {
+      entry.attached = false
+      this.resetFlow(entry)
+    }
+  }
+
   /** Deja de emitir datos en vivo (el pty sigue vivo y acumulando buffer) */
   detach(id: string): void {
     const entry = this.entries.get(id)
-    if (entry) entry.attached = false
+    if (!entry) return
+    entry.attached = false
+    // Los ACKs de la card desmontada no llegarán: nunca dejar un pty detached pausado
+    this.resetFlow(entry)
   }
 
   /** Últimas líneas no vacías del buffer, sin secuencias ANSI/OSC (para resúmenes) */
@@ -492,6 +647,7 @@ export class PtyManager {
     const session = this.store.get(id)
     if (!session) return
     const entry = this.entries.get(id)
+    if (entry) this.resetFlow(entry)
     if (entry?.pty) {
       try {
         entry.pty.kill()
@@ -520,6 +676,7 @@ export class PtyManager {
 
   kill(id: string): void {
     const entry = this.entries.get(id)
+    if (entry) this.resetFlow(entry)
     if (entry?.pty) {
       try {
         entry.pty.kill()
@@ -537,6 +694,8 @@ export class PtyManager {
     clearInterval(this.gitTimer)
     this.flushPersisted()
     for (const [, entry] of this.entries) {
+      if (entry.flushTimer) clearTimeout(entry.flushTimer)
+      if (entry.pauseGuard) clearTimeout(entry.pauseGuard)
       try {
         entry.pty?.kill()
       } catch {

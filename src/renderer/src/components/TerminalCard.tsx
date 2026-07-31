@@ -94,6 +94,8 @@ interface Props {
   onRename: (title: string) => void
   onDescriptionChange: (text: string) => void
   onStartupCmdChange: (cmd: string) => void
+  /** Mantiene sessions[] del padre sincronizado con el modelo detectado */
+  onModelChange: (model: string) => void
   onToggleFocus: () => void
 }
 
@@ -109,6 +111,7 @@ export function TerminalCard({
   onRename,
   onDescriptionChange,
   onStartupCmdChange,
+  onModelChange,
   onToggleFocus
 }: Props): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -121,6 +124,8 @@ export function TerminalCard({
   copyOnSelectRef.current = copyOnSelect
   const onToggleFocusRef = useRef(onToggleFocus)
   onToggleFocusRef.current = onToggleFocus
+  const onModelChangeRef = useRef(onModelChange)
+  onModelChangeRef.current = onModelChange
   const [exited, setExited] = useState<number | null>(null)
   const [cwd, setCwd] = useState(session.cwd)
   const [branch, setBranch] = useState<string | null>(null)
@@ -296,10 +301,19 @@ export function TerminalCard({
     ;(window.__orqTerms ??= new Map()).set(session.id, term)
     setActiveTerm(term)
 
-    const offData = window.orq.onTermData(session.id, (d) => term.write(d))
+    // ACK de flow control en el callback de write: el main pausa el pty si
+    // acumula demasiados chars sin ACKear (renderer saturado) y lo reanuda al drenar.
+    const offData = window.orq.onTermData(session.id, (d, epoch) =>
+      term.write(d, () => window.orq.ackData(session.id, d.length, epoch))
+    )
     const offExit = window.orq.onTermExit(session.id, (code) => setExited(code))
     const offCwd = window.orq.onCwd(session.id, setCwd)
-    const offModel = window.orq.onModel(session.id, setModel)
+    const offModel = window.orq.onModel(session.id, (m) => {
+      setModel(m)
+      // Igual que el fix histórico de startupCmd: sin esto, sessions[] del padre
+      // conserva el modelo viejo y cualquier consumidor externo lo lee stale.
+      onModelChangeRef.current(m)
+    })
     const offBranch = window.orq.onGitBranch(session.id, setBranch)
     // OJO: term.onData dispara tanto por tecleo real como por respuestas AUTOMÁTICAS
     // de xterm.js a secuencias de protocolo del propio shell (consultas de
@@ -319,13 +333,16 @@ export function TerminalCard({
       }, 250)
     })
 
-    window.orq.attach(session.id, term.cols, term.rows).then((buffer) => {
+    window.orq.attach(session.id, term.cols, term.rows).then(({ buffer, epoch }) => {
       if (buffer) {
         // Empuja el contenido reproducido al scrollback antes de que llegue el
         // primer output en vivo del shell: PowerShell/PSReadLine suelen emitir
         // un clear-screen al iniciar, que borraría lo reproducido si todavía
         // estuviera en el viewport (un clear no toca el scrollback).
-        term.write(buffer + '\r\n'.repeat(term.rows))
+        // Se ACKea buffer.length (no lo escrito): el padding no está contado en main.
+        term.write(buffer + '\r\n'.repeat(term.rows), () =>
+          window.orq.ackData(session.id, buffer.length, epoch)
+        )
       }
       window.orq.resize(session.id, term.cols, term.rows)
     })

@@ -100,7 +100,10 @@ function claudeUserText(record: any): string | null {
   return null
 }
 
-function listJsonlFiles(dir: string, nameRe?: RegExp): { path: string; mtimeMs: number }[] {
+function listJsonlFiles(
+  dir: string,
+  nameRe?: RegExp
+): { path: string; mtimeMs: number; birthtimeMs: number }[] {
   if (!existsSync(dir)) return []
   let entries: Dirent[]
   try {
@@ -108,14 +111,15 @@ function listJsonlFiles(dir: string, nameRe?: RegExp): { path: string; mtimeMs: 
   } catch {
     return []
   }
-  const out: { path: string; mtimeMs: number }[] = []
+  const out: { path: string; mtimeMs: number; birthtimeMs: number }[] = []
   for (const e of entries) {
     if (!e.isFile()) continue
     if (!e.name.endsWith('.jsonl')) continue
     if (nameRe && !nameRe.test(e.name)) continue
     const path = join(dir, e.name)
     try {
-      out.push({ path, mtimeMs: statSync(path).mtimeMs })
+      const st = statSync(path)
+      out.push({ path, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs })
     } catch {
       /* el archivo pudo borrarse entre el readdir y el stat */
     }
@@ -173,7 +177,8 @@ function scanClaude(cwd: string): AgentSessionRef[] {
       id: idFromFile(f.path),
       title: title ?? '(sin título)',
       cwd: recordCwd ?? cwd,
-      updatedAt: f.mtimeMs
+      updatedAt: f.mtimeMs,
+      createdAt: f.birthtimeMs
     })
   }
   return out
@@ -227,7 +232,8 @@ function scanQwen(cwd: string): AgentSessionRef[] {
       id: idFromFile(f.path),
       title: title ?? '(sin título)',
       cwd: recordCwd ?? cwd,
-      updatedAt: f.mtimeMs
+      updatedAt: f.mtimeMs,
+      createdAt: f.birthtimeMs
     })
   }
   return out
@@ -238,7 +244,7 @@ async function scanOpenCode(cwd: string): Promise<AgentSessionRef[]> {
   if (!existsSync(dbPath)) return []
   const directory = cwd.replace(/\\/g, '/')
   const query =
-    'SELECT id, title, directory, time_updated FROM session ' +
+    'SELECT id, title, directory, time_updated, time_created FROM session ' +
     'WHERE directory = ? AND parent_id IS NULL AND time_archived IS NULL ' +
     'ORDER BY time_updated DESC LIMIT ?'
 
@@ -292,7 +298,8 @@ async function scanOpenCode(cwd: string): Promise<AgentSessionRef[]> {
       id: String(r.id),
       title: String(r.title ?? '(sin título)'),
       cwd: String(r.directory ?? cwd),
-      updatedAt: Number(r.time_updated ?? 0)
+      updatedAt: Number(r.time_updated ?? 0),
+      createdAt: r.time_created != null ? Number(r.time_created) : undefined
     }))
   } catch (err) {
     console.error('[agentSessions] escaneo de OpenCode falló, se omite:', err)

@@ -33,6 +33,19 @@ export interface TerminalSession {
   resumeOverlay?: 'auto' | 'never'
   /** Modelo activo detectado en la salida del pty (best-effort, ver modelDetect.ts) */
   model?: string
+  /**
+   * Sesiones de agente trabajadas EN esta terminal (más reciente primero). El
+   * overlay de "retomar" y el menú de sesiones solo ofrecen las propias — si no
+   * hay ninguna, caen a la lista completa del cwd y al retomar se la apropian.
+   */
+  agentSessions?: OwnedAgentSession[]
+}
+
+/** Una sesión de agente asociada a la terminal que la trabajó */
+export interface OwnedAgentSession {
+  agent: AgentKind
+  id: string
+  at: number
 }
 
 export interface WorkspacesInfo {
@@ -153,6 +166,12 @@ export interface AgentSessionRef {
   /** cwd real registrado en la sesión (desambigua colisiones de carpeta/slug) */
   cwd: string
   updatedAt: number
+  /**
+   * Cuándo se CREÓ la sesión (birthtime del archivo / time_created). Clave para
+   * el claim-watch: una sesión externa viva tiene mtime reciente pero creación
+   * vieja — solo un archivo nacido después del arranque del agente es "nuevo".
+   */
+  createdAt?: number
 }
 
 export interface SessionScanResult {
