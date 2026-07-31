@@ -1,6 +1,6 @@
 {
   "name": "wingdeck",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Orquestador visual de flotas de agentes IA en terminales, con memoria compartida y sesiones persistentes",
   "main": "./out/main/index.js",
   "author": "kenshin1986",
