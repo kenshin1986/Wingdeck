@@ -31,6 +31,19 @@ import {
   OPENCODE_ID_RE
 } from './agentSessions'
 
+// El main de Wingdeck debe correr SIEMPRE en prioridad Normal. Si se lanza desde
+// una cadena de procesos degradada (el instalador ejecutado por un agente, una
+// terminal con prioridad baja, un script), Windows le haría heredar BELOW_NORMAL
+// y quedaría compitiendo empatado contra los agentes que él mismo degrada — el
+// main bombea todos los ptys y el IPC, así que la app entera se percibe congelada.
+// Se ejecuta a nivel de módulo, antes de crear cualquier proceso hijo de Electron,
+// para que renderer/gpu/utility nazcan también en Normal.
+try {
+  setPriority(process.pid, osConstants.priority.PRIORITY_NORMAL)
+} catch {
+  /* sin permiso para cambiar la prioridad: mejor seguir que fallar el arranque */
+}
+
 // El producto se rebrandeó a "Wingdeck", pero la carpeta de datos de usuario sigue
 // siendo "orq-terminal" para no perder sesiones/cerebros/plantillas ya guardados.
 app.setPath('userData', join(app.getPath('appData'), 'orq-terminal'))
@@ -264,12 +277,22 @@ function createTray(): void {
  * solo afectaría a spawns futuros. Usa el último snapshot del monitor (hasta
  * 2.5s viejo) más los pids raíz de cada pty; los pids ya muertos fallan en
  * silencio (ESRCH), no son un error real.
+ *
+ * ⚠️ Los pids del snapshot pueden estar RECICLADOS (Windows reusa pids
+ * agresivamente y acá mueren subagentes todo el tiempo): un setPriority a un
+ * pid stale puede pegarle a un proceso ajeno. El caso catastrófico —
+ * degradar al propio Wingdeck y congelar la app — se bloquea explícitamente:
+ * nunca se toca process.pid, y trees() ya excluye todo pid que el snapshot
+ * haya visto como proceso Wingdeck. El riesgo residual sobre procesos de
+ * terceros es una degradación puntual de prioridad, benigna y del mismo
+ * orden que la de cualquier administrador de tareas.
  */
 function applyAgentPriority(below: boolean): void {
   const cls = below ? osConstants.priority.PRIORITY_BELOW_NORMAL : osConstants.priority.PRIORITY_NORMAL
   const pids = new Set<number>()
   for (const pid of Object.values(ptys?.pids() ?? {})) pids.add(pid)
   for (const tree of Object.values(monitor?.trees() ?? {})) for (const pid of tree) pids.add(pid)
+  pids.delete(process.pid)
   for (const pid of pids) {
     try {
       setPriority(pid, cls)

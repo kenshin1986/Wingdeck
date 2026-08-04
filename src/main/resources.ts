@@ -129,7 +129,13 @@ export class ResourceMonitor {
       // cpuTime en 100ns => delta / (ms * 10000) es fracción de un núcleo
       const cpu = elapsedMs > 0 ? (cpuDelta / (elapsedMs * 10_000) / cores) * 100 : 0
       terminals[termId] = { cpu: Math.min(100, cpu), mem, procs: count, agent }
-      this.lastTrees.set(termId, [...seen])
+      // Nunca exponer procesos Wingdeck en el árbol (p. ej. una segunda instancia
+      // transitoria lanzada desde una terminal): applyAgentPriority usa esta
+      // lista para cambiar prioridades y degradar la propia app la congelaría.
+      this.lastTrees.set(
+        termId,
+        [...seen].filter((p) => procs.get(p)?.name !== 'wingdeck.exe')
+      )
       if (process.env.ORQ_DEBUG) {
         const names = [...seen].map((p) => procs.get(p)?.name).filter(Boolean)
         console.error(`[res-debug] ${termId} root=${rootPid} tree=${names.join('|')} agent=${agent}`)
