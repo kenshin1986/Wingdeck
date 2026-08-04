@@ -51,9 +51,14 @@ configuración inicial"**.
 - Cada terminal es una tarjeta libre: **arrastrala desde su barra superior** para
   moverla, y **desde la esquina inferior derecha** (o los bordes) para redimensionarla.
   Wingdeck recuerda la posición y el tamaño de cada una entre reinicios.
-- **`▦ Distribuir`** (visible con más de una terminal) reacomoda todas las terminales del
-  workspace activo en una grilla que llena el espacio disponible por igual — útil
-  después de crear varias de golpe o de mover manualmente algunas fuera de sitio.
+- **`▦ Acomodar`** reacomoda todas las terminales sin fijar del workspace activo para que
+  quepan en pantalla sin scroll — útil después de crear varias de golpe o de mover
+  manualmente algunas fuera de sitio. La flecha **`▾`** a su lado abre un selector de
+  columnas (**Auto** / **1** / **2** / **3**): elegís una y se reacomoda al instante:
+  Wingdeck recuerda la elección para el próximo clic en Acomodar.
+- **`📌` Fijar** (botón en el header de cada terminal) evita que esa terminal se mueva o
+  redimensione — ni arrastrándola a mano ni con `▦ Acomodar`, que reparte el resto de las
+  terminales a su alrededor sin tocarla.
 - **Doble clic** en el título de una terminal para renombrarla.
 - **`↻`** en el header reinicia el shell de esa terminal, en la misma carpeta donde
   estaba. **`✕`** la cierra y la borra de la sesión (el historial persistido también se
@@ -95,8 +100,8 @@ De izquierda a derecha:
 - **CPU/RAM/procesos** de esa terminal (suma de todo su árbol de procesos, no solo el
   shell).
 - Botones: **📋** cola de prompts, **⚡** comando de arranque, **🕸** abrir grafo Graphify
-  (solo si existe), **🔍** buscar en el historial, **⛶** modo enfoque, **↻** reiniciar,
-  **✕** cerrar.
+  (solo si existe), **🔍** buscar en el historial, **⛶** modo enfoque, **📌** fijar (no se
+  mueve ni redimensiona, ni a mano ni con `▦ Acomodar`), **↻** reiniciar, **✕** cerrar.
 - **Clic derecho** sobre la terminal abre un menú contextual con: copiar/pegar, editar
   descripción, comando de arranque, "Sesiones anteriores…" y más.
 
@@ -248,6 +253,9 @@ El botón **⚙** de la barra superior abre:
 - Sonido al terminar un agente
 - Recordar el historial entre reinicios (scrollback persistente)
 - Preguntar antes de cerrar del todo
+- **Priorizar la interfaz sobre los agentes** (activado por defecto): baja la prioridad de
+  CPU de los agentes que corren en cada terminal para que Wingdeck no se bloquee si
+  saturan el procesador — ver [Solución de problemas](#solución-de-problemas).
 - Umbral de inactividad para considerar "listo" (4/6/10/15 segundos)
 - "Repetir configuración inicial" (reabre el asistente de primer arranque)
 
@@ -275,6 +283,13 @@ Todo se guarda en `%APPDATA%\orq-terminal\` (ese nombre de carpeta es previo al 
 
 ## Solución de problemas
 
+- **La app se pone lenta o deja de responder con varios agentes trabajando a la vez**:
+  desde ⚙, "Priorizar la interfaz sobre los agentes" (activado por defecto) baja la
+  prioridad de CPU de los shells y de los agentes que lanzás en ellos, para que Windows
+  le siga dando ciclos a la interfaz aunque los agentes saturen el procesador. Si
+  preferís que los agentes corran a máxima velocidad aunque la interfaz se sienta más
+  pesada, podés desactivarlo. No aplica a terminales WSL (los procesos corren dentro de
+  la VM de WSL2, fuera del control de prioridad de Windows).
 - **Las terminales dejan de responder al tecleo con muchos workspaces/terminales
   abiertas**: a partir de la versión que incluye esta guía, Wingdeck aplica control de
   flujo entre cada terminal y la salida en vivo, así que una salida muy intensa en varias

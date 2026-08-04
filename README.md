@@ -15,7 +15,9 @@ funciones, desde crear tu primera terminal hasta orquestar una flota de agentes.
 - **Workspaces con nombre**: agrupa terminales por proyecto (selector `▣` en la barra superior). Al cambiar de workspace las terminales siguen vivas en segundo plano y recuperan su pantalla al volver.
 - **Comando de arranque** (⚡ en cada terminal): se ejecuta automáticamente al abrir o restaurar esa terminal (p. ej. `npm run dev`), disparado cuando el shell muestra su primer prompt.
 - **Monitoreo de recursos**: CPU y RAM del sistema en la barra superior, y consumo por terminal (árbol de procesos completo de cada shell).
-- **Rendimiento**: renderizado WebGL en cada terminal, con control de flujo entre cada terminal y la ventana (evita que una salida muy intensa en varias terminales a la vez sature la app, incluso con muchos workspaces abiertos).
+- **Rendimiento**: renderizado WebGL en cada terminal (activo solo en las visibles, para escalar con muchas abiertas a la vez), control de flujo entre cada terminal y la ventana (evita que una salida muy intensa en varias terminales sature la app), y prioridad de CPU reducida para los agentes (⚙ "Priorizar la interfaz sobre los agentes", activado por defecto) para que la interfaz no se bloquee cuando saturan el procesador.
+- **Acomodo automático (▦ Acomodar)**: reacomoda todas las terminales sin fijar para que quepan en pantalla sin scroll. La flecha `▾` a su lado abre un selector de columnas (Auto/1/2/3) que se recuerda para el próximo clic.
+- **Fijar terminal (📌)**: evita que una terminal se mueva o redimensione — ni a mano ni con `▦ Acomodar`, que reparte el resto a su alrededor sin tocarla.
 - **Detección de modelo activo**: si el agente de la terminal expone qué modelo está usando (Claude Code, OpenCode), un chip junto al cwd lo muestra y se actualiza solo al cambiar de modelo (p. ej. con `/model`).
 
 ### Modo orquestador de agentes IA (Claude Code, Qwen Code, OpenCode)

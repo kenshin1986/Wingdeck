@@ -172,6 +172,15 @@ export class SessionStore {
     }
   }
 
+  updatePinned(id: string, pinned: boolean): void {
+    const t = this.get(id)
+    if (t) {
+      if (pinned) t.pinned = true
+      else delete t.pinned
+      this.save()
+    }
+  }
+
   updateDescription(id: string, text: string): void {
     const t = this.get(id)
     if (t) {

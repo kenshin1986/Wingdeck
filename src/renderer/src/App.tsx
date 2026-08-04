@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GridLayout, useContainerWidth, noCompactor, type Layout, type LayoutItem } from 'react-grid-layout'
+import { GRID_COLS, ROW_HEIGHT, MARGIN, MIN_W, MIN_H, availableRows, arrangeLayout } from './layout'
 import type {
   ActivityEvent,
   ActivityInfo,
@@ -44,11 +45,22 @@ function playChime(): void {
   }
 }
 
-const GRID_COLS = 24
-const ROW_HEIGHT = 24
-
 function toLayoutItem(s: TerminalSession): LayoutItem {
-  return { i: s.id, x: s.layout.x, y: s.layout.y, w: s.layout.w, h: s.layout.h, minW: 5, minH: 7 }
+  return {
+    i: s.id,
+    x: s.layout.x,
+    y: s.layout.y,
+    w: s.layout.w,
+    h: s.layout.h,
+    minW: MIN_W,
+    minH: MIN_H,
+    ...(s.pinned ? { isDraggable: false, isResizable: false } : {})
+  }
+}
+
+/** Tamaño de la primera terminal de un workspace vacío: aprovecha toda la pantalla visible. */
+function firstTerminalLayout(containerH: number): TermLayout {
+  return { x: 0, y: 0, w: GRID_COLS, h: availableRows(containerH) }
 }
 
 export default function App(): React.JSX.Element {
@@ -194,10 +206,8 @@ export default function App(): React.JSX.Element {
       if (current.length === 0) {
         // Workspace vacío: que la primera terminal aproveche toda la pantalla
         // disponible en vez de un tamaño fijo pensado para monitores chicos.
-        const el = containerRef.current
-        const containerH = el?.clientHeight || 700
-        const rows = Math.max(7, Math.floor((containerH - 20) / (ROW_HEIGHT + 10)))
-        item = { x: 0, y: 0, w: GRID_COLS, h: rows }
+        const containerH = containerRef.current?.clientHeight || 700
+        item = firstTerminalLayout(containerH)
       } else {
         const y = current.reduce((max, l) => Math.max(max, l.y + l.h), 0)
         item = { x: 0, y, w: 12, h: 14 }
@@ -215,10 +225,8 @@ export default function App(): React.JSX.Element {
       const current = layoutRef.current
       let item: TermLayout
       if (current.length === 0) {
-        const el = containerRef.current
-        const containerH = el?.clientHeight || 700
-        const rows = Math.max(7, Math.floor((containerH - 20) / (ROW_HEIGHT + 10)))
-        item = { x: 0, y: 0, w: GRID_COLS, h: rows }
+        const containerH = containerRef.current?.clientHeight || 700
+        item = firstTerminalLayout(containerH)
       } else {
         const y = current.reduce((max, l) => Math.max(max, l.y + l.h), 0)
         item = { x: 0, y, w: 12, h: 14 }
@@ -251,46 +259,42 @@ export default function App(): React.JSX.Element {
     [openLoginTerminal, finishOnboarding]
   )
 
-  /** Reparte todas las terminales del workspace actual para llenar el lienzo por igual */
-  const distributeTiles = useCallback(() => {
-    const current = sessionsRef.current
-    const n = current.length
-    if (n === 0) return
+  /**
+   * Reacomoda todas las terminales no fijadas para que quepan en el lienzo
+   * visible sin scroll, esquivando las pineadas. Sin argumento usa la última
+   * preferencia de columnas guardada en ajustes (o 'auto').
+   */
+  const arrangeTiles = useCallback((cols?: 'auto' | 1 | 2 | 3) => {
+    if (sessionsRef.current.length === 0) return
+    const chosen = cols ?? settingsRef.current?.layoutColumns ?? 'auto'
     const el = containerRef.current
-    const containerW = el?.clientWidth || 1400
-    const containerH = el?.clientHeight || 800
-    const margin = 10
-
-    let cols = Math.max(1, Math.round(Math.sqrt(n * (containerW / containerH))))
-    cols = Math.min(cols, n, Math.floor(GRID_COLS / 5) || 1)
-    const rows = Math.ceil(n / cols)
-    const totalRowUnits = Math.max(rows * 7, Math.round((containerH - margin) / (ROW_HEIGHT + margin)))
-    const baseH = Math.floor(totalRowUnits / rows)
-    let hRemainder = totalRowUnits - baseH * rows
-
-    const items: LayoutItem[] = []
-    let y = 0
-    for (let row = 0; row < rows; row++) {
-      const startIdx = row * cols
-      const itemsInRow = Math.min(cols, n - startIdx)
-      if (itemsInRow <= 0) break
-      const h = baseH + (hRemainder > 0 ? 1 : 0)
-      if (hRemainder > 0) hRemainder--
-      const baseW = Math.floor(GRID_COLS / itemsInRow)
-      let wRemainder = GRID_COLS - baseW * itemsInRow
-      let x = 0
-      for (let c = 0; c < itemsInRow; c++) {
-        const session = current[startIdx + c]
-        const w = baseW + (wRemainder > 0 ? 1 : 0)
-        if (wRemainder > 0) wRemainder--
-        items.push({ i: session.id, x, y, w, h, minW: 5, minH: 7 })
-        x += w
-      }
-      y += h
-    }
-
+    const pinnedIds = new Set(sessionsRef.current.filter((s) => s.pinned).map((s) => s.id))
+    const items = arrangeLayout({
+      current: layoutRef.current,
+      pinnedIds,
+      cols: chosen,
+      containerW: el?.clientWidth || 1400,
+      containerH: el?.clientHeight || 800
+    })
     setLayout(items)
     window.orq.updateLayout(items.map((l) => ({ id: l.i, x: l.x, y: l.y, w: l.w, h: l.h })))
+  }, [])
+
+  const toggleTerminalPin = useCallback((id: string) => {
+    const next = !sessionsRef.current.find((s) => s.id === id)?.pinned
+    window.orq.setPinned(id, next)
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, pinned: next || undefined } : s)))
+    setLayout((prev) =>
+      prev.map((l) =>
+        l.i === id
+          ? {
+              ...l,
+              isDraggable: next ? false : undefined,
+              isResizable: next ? false : undefined
+            }
+          : l
+      )
+    )
   }, [])
 
   const closeTerminal = useCallback((id: string) => {
@@ -324,7 +328,19 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const onLayoutChange = useCallback((next: Layout) => {
-    const items = next.map((l) => ({ i: l.i, x: l.x, y: l.y, w: l.w, h: l.h, minW: 5, minH: 7 }))
+    // Los flags de pin se re-derivan de sessionsRef en vez de confiar en el eco
+    // de RGL — así nunca se pierden en un ciclo de drag/resize de otra card.
+    const pinnedIds = new Set(sessionsRef.current.filter((s) => s.pinned).map((s) => s.id))
+    const items = next.map((l) => ({
+      i: l.i,
+      x: l.x,
+      y: l.y,
+      w: l.w,
+      h: l.h,
+      minW: MIN_W,
+      minH: MIN_H,
+      ...(pinnedIds.has(l.i) ? { isDraggable: false as const, isResizable: false as const } : {})
+    }))
     setLayout(items)
     window.orq.updateLayout(items.map((l) => ({ id: l.i, x: l.x, y: l.y, w: l.w, h: l.h })))
   }, [])
@@ -348,7 +364,7 @@ export default function App(): React.JSX.Element {
         onRenameWorkspace={renameWorkspace}
         onDeleteWorkspace={deleteWorkspace}
         onLaunchTemplate={applyWorkspace}
-        onDistribute={distributeTiles}
+        onArrange={arrangeTiles}
         onOpenEvents={() => setUnseen(0)}
         onJump={jumpTo}
         onClearEvents={() => setEvents([])}
@@ -381,7 +397,7 @@ export default function App(): React.JSX.Element {
           <GridLayout
             width={width}
             layout={layout}
-            gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT, margin: [10, 10] }}
+            gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT, margin: [MARGIN, MARGIN] }}
             dragConfig={{ enabled: true, handle: '.term-header' }}
             resizeConfig={{ enabled: true, handles: ['se', 'e', 's'] }}
             compactor={noCompactor}
@@ -403,6 +419,9 @@ export default function App(): React.JSX.Element {
                   onStartupCmdChange={(cmd) => updateTerminalStartupCmd(s.id, cmd)}
                   onModelChange={(model) => updateTerminalModel(s.id, model)}
                   onToggleFocus={() => setFocusId((cur) => (cur === s.id ? null : s.id))}
+                  pinned={!!s.pinned}
+                  onTogglePin={() => toggleTerminalPin(s.id)}
+                  obscured={focusId !== null && focusId !== s.id}
                 />
               </div>
             ))}

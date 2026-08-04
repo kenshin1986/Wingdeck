@@ -109,6 +109,10 @@ const api = {
     ipcRenderer.send('term:fontSize', id, size)
   },
 
+  setPinned: (id: string, pinned: boolean): void => {
+    ipcRenderer.send('term:pinned', id, pinned)
+  },
+
   persistBuffer: (id: string, text: string): void => {
     ipcRenderer.send('term:persistBuffer', id, text)
   },

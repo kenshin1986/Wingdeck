@@ -42,6 +42,8 @@ export class ResourceMonitor {
   /** pid → agente detectado por CommandLine (null = consultado, sin agente) */
   private cmdlineCache = new Map<number, AgentKind | null>()
   private cmdlineQueryRunning = false
+  /** Último árbol de pids visto por terminal (para reaplicar prioridad de CPU al togglear) */
+  private lastTrees = new Map<string, number[]>()
 
   start(getPids: () => Record<string, number>, emit: (snap: ResourceSnapshot) => void): void {
     this.proc = spawn(psExe(), ['-NoProfile', '-NonInteractive', '-Command', MONITOR_SCRIPT], {
@@ -127,6 +129,7 @@ export class ResourceMonitor {
       // cpuTime en 100ns => delta / (ms * 10000) es fracción de un núcleo
       const cpu = elapsedMs > 0 ? (cpuDelta / (elapsedMs * 10_000) / cores) * 100 : 0
       terminals[termId] = { cpu: Math.min(100, cpu), mem, procs: count, agent }
+      this.lastTrees.set(termId, [...seen])
       if (process.env.ORQ_DEBUG) {
         const names = [...seen].map((p) => procs.get(p)?.name).filter(Boolean)
         console.error(`[res-debug] ${termId} root=${rootPid} tree=${names.join('|')} agent=${agent}`)
@@ -185,6 +188,11 @@ export class ResourceMonitor {
         }
       }
     )
+  }
+
+  /** Snapshot del último árbol de pids conocido por terminal (best-effort, hasta 2.5s viejo) */
+  trees(): Record<string, number[]> {
+    return Object.fromEntries(this.lastTrees)
   }
 
   private globalCpu(): number {

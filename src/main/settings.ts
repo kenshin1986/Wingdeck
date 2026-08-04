@@ -12,6 +12,8 @@ const DEFAULTS: AppSettings = {
   persistScrollback: true,
   askOnQuit: true,
   onboardingDone: false,
+  uiPriority: true,
+  layoutColumns: 'auto',
   apiKeys: {}
 }
 

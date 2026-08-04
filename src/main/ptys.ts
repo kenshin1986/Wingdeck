@@ -1,7 +1,7 @@
 import { spawn, type IPty } from '@lydell/node-pty'
 import { app, type WebContents } from 'electron'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
-import { homedir } from 'os'
+import { homedir, setPriority, constants as osConstants } from 'os'
 import { join } from 'path'
 import type { AppSettings, TerminalSession } from '../shared/types'
 import { shellPath } from './shells'
@@ -313,6 +313,19 @@ export class PtyManager {
       cwd,
       env: env as { [key: string]: string }
     })
+
+    // Baja la prioridad de CPU del shell (y por herencia de Windows, de todo lo
+    // que se lance dentro, incluidos los agentes) para que la UI no se bloquee
+    // cuando saturan los cores. No aplica a WSL: wsl.exe es un relay hacia la
+    // VM WSL2, donde corren los procesos reales — la clase de prioridad de
+    // Windows no gobierna ahí, pero fijarla igual es inofensivo.
+    if (this.getSettings().uiPriority) {
+      try {
+        setPriority(pty.pid, osConstants.priority.PRIORITY_BELOW_NORMAL)
+      } catch (err) {
+        console.error('[ptys] no se pudo bajar la prioridad del pty:', err)
+      }
+    }
 
     const prev = this.entries.get(session.id)
     const entry: Entry = {

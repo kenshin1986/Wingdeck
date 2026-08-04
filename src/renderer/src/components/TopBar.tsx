@@ -44,7 +44,7 @@ interface Props {
   onRenameWorkspace: (oldName: string, newName: string) => void
   onDeleteWorkspace: (name: string) => void
   onLaunchTemplate: (result: WorkspaceResult) => void
-  onDistribute: () => void
+  onArrange: (cols?: 'auto' | 1 | 2 | 3) => void
   onOpenEvents: () => void
   onJump: (id: string, workspace: string) => void
   onClearEvents: () => void
@@ -67,7 +67,7 @@ export function TopBar({
   onRenameWorkspace,
   onDeleteWorkspace,
   onLaunchTemplate,
-  onDistribute,
+  onArrange,
   onOpenEvents,
   onJump,
   onClearEvents,
@@ -77,7 +77,9 @@ export function TopBar({
   const [menuOpen, setMenuOpen] = useState(false)
   const [wsOpen, setWsOpen] = useState(false)
   const [cfgOpen, setCfgOpen] = useState(false)
+  const [arrangeOpen, setArrangeOpen] = useState(false)
   const cfgRef = useClickOutside(cfgOpen, () => setCfgOpen(false))
+  const arrangeRef = useClickOutside(arrangeOpen, () => setArrangeOpen(false))
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [newWsName, setNewWsName] = useState('')
@@ -200,14 +202,43 @@ export function TopBar({
         <FleetMenu onLaunch={onLaunchTemplate} />
         <BroadcastPanel sessions={sessions} />
         <BrainPanel workspace={workspaces.active} sessions={sessions} />
-        {sessions.length > 1 && (
-          <button
-            className="btn-secondary"
-            title="Repartir todas las terminales del workspace por igual en el espacio disponible"
-            onClick={onDistribute}
-          >
-            ▦ Distribuir
-          </button>
+        {sessions.length >= 1 && (
+          <div className="arrange-menu" ref={arrangeRef}>
+            <button
+              className="btn-secondary arrange-main"
+              title="Acomodar las terminales sin fijar para que quepan en pantalla sin scroll"
+              onClick={() => onArrange()}
+            >
+              ▦ Acomodar
+            </button>
+            <button
+              className="btn-secondary arrange-caret"
+              title="Elegir columnas"
+              onClick={() => setArrangeOpen((v) => !v)}
+            >
+              ▾
+            </button>
+            {arrangeOpen && (
+              <div className="menu">
+                {(['auto', 1, 2, 3] as const).map((c) => (
+                  <button
+                    key={c}
+                    className="menu-item"
+                    onClick={() => {
+                      setArrangeOpen(false)
+                      onUpdateSettings({ layoutColumns: c })
+                      onArrange(c)
+                    }}
+                  >
+                    <span className="menu-icon">
+                      {(settings?.layoutColumns ?? 'auto') === c ? '●' : '○'}
+                    </span>
+                    {c === 'auto' ? 'Auto' : `${c} columna${c === 1 ? '' : 's'}`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -255,7 +286,8 @@ export function TopBar({
                   ['systemNotif', 'Notificación de Windows'],
                   ['sound', 'Sonido al terminar un agente'],
                   ['persistScrollback', 'Recordar el historial entre reinicios'],
-                  ['askOnQuit', 'Preguntar antes de cerrar del todo']
+                  ['askOnQuit', 'Preguntar antes de cerrar del todo'],
+                  ['uiPriority', 'Priorizar la interfaz sobre los agentes']
                 ] as const
               ).map(([key, label]) => (
                 <label key={key} className="cfg-row">

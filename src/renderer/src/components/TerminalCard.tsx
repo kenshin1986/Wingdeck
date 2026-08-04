@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { SerializeAddon } from '@xterm/addon-serialize'
+import type { WebglAddon } from '@xterm/addon-webgl'
 import type {
   ActivityInfo,
   AgentKind,
@@ -20,6 +21,11 @@ const MAX_FONT = 22
 const DEFAULT_FONT = 13
 const PERSIST_SNAPSHOT_MS = 10_000
 const PERSIST_SCROLLBACK_ROWS = 3000
+const SCROLLBACK_VISIBLE = 8000
+/** Scrollback recortado para cards ocultas: libera memoria sin perder el flujo ACK/replay */
+const SCROLLBACK_DORMANT = 1000
+/** Espera antes de considerar "inactiva" una card oculta — evita thrash durante scroll */
+const DORMANT_DELAY_MS = 3000
 // Rutas Windows absolutas o relativas con extensión, con línea opcional (archivo.ts:42)
 const PATH_RE =
   /((?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|(?:[\w-]+[\\/])+)[\w.\\/-]*\.[A-Za-z0-9]{1,10})(?::(\d+))?/g
@@ -97,6 +103,10 @@ interface Props {
   /** Mantiene sessions[] del padre sincronizado con el modelo detectado */
   onModelChange: (model: string) => void
   onToggleFocus: () => void
+  pinned: boolean
+  onTogglePin: () => void
+  /** Tapada por el modo enfoque de otra terminal (el IntersectionObserver no ve oclusión por z-index) */
+  obscured: boolean
 }
 
 export function TerminalCard({
@@ -112,12 +122,18 @@ export function TerminalCard({
   onDescriptionChange,
   onStartupCmdChange,
   onModelChange,
-  onToggleFocus
+  onToggleFocus,
+  pinned,
+  onTogglePin,
+  obscured
 }: Props): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const webglRef = useRef<WebglAddon | null>(null)
+  const webglFailedRef = useRef(false)
+  const disposedRef = useRef(false)
   const searchRef = useRef<SearchAddon | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const copyOnSelectRef = useRef(copyOnSelect)
@@ -149,6 +165,11 @@ export function TerminalCard({
   const [otherToolOpen, setOtherToolOpen] = useState(false)
   const [neverAskAgain, setNeverAskAgain] = useState(false)
   const [activeTerm, setActiveTerm] = useState<Terminal | null>(null)
+  const [inView, setInView] = useState(true)
+  const [dormant, setDormant] = useState(false)
+  const dormantRef = useRef(false)
+  dormantRef.current = dormant
+  const dormantTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typedSinceMountRef = useRef(false)
   const dragDepth = useRef(0)
   const accent = ACCENTS[session.color % ACCENTS.length]
@@ -191,16 +212,55 @@ export function TerminalCard({
     if (sel) window.orq.copyText(sel)
   }
 
+  /**
+   * Carga el renderer WebGL en `term` si no está cargado ya. Chromium limita
+   * ~16 contextos WebGL activos: liberar los de cards ocultas (ver
+   * disposeWebgl) evita que las visibles caigan al renderer DOM en silencio.
+   */
+  const loadWebgl = (term: Terminal): void => {
+    if (disposedRef.current || dormantRef.current) return
+    if (webglRef.current || webglFailedRef.current) return
+    import('@xterm/addon-webgl')
+      .then(({ WebglAddon }) => {
+        // La import resuelve async: revalidar que seguimos queriendo WebGL
+        if (disposedRef.current || dormantRef.current || webglRef.current) return
+        try {
+          const addon = new WebglAddon()
+          // Ante pérdida de contexto (driver reset, límite de contextos) hay que
+          // disponer — NO se marca como fallida: se reintenta al volver a vista.
+          addon.onContextLoss(() => disposeWebgl())
+          term.loadAddon(addon)
+          webglRef.current = addon
+        } catch {
+          webglFailedRef.current = true // GPU no disponible: se queda en el renderer DOM
+        }
+      })
+      .catch(() => {
+        webglFailedRef.current = true
+      })
+  }
+
+  const disposeWebgl = (): void => {
+    const addon = webglRef.current
+    webglRef.current = null
+    try {
+      addon?.dispose()
+    } catch {
+      /* ya dispuesto (p. ej. por term.dispose()) */
+    }
+  }
+
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    disposedRef.current = false
 
     const term = new Terminal({
       fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
       fontSize: session.fontSize ?? DEFAULT_FONT,
       lineHeight: 1.15,
       cursorBlink: true,
-      scrollback: 8000,
+      scrollback: SCROLLBACK_VISIBLE,
       allowProposedApi: true,
       theme: THEME
     })
@@ -279,16 +339,10 @@ export function TerminalCard({
 
     term.open(el)
 
-    // Renderizado WebGL para mejor rendimiento; si falla, xterm usa el renderer DOM.
-    import('@xterm/addon-webgl')
-      .then(({ WebglAddon }) => {
-        try {
-          term.loadAddon(new WebglAddon())
-        } catch {
-          /* GPU no disponible */
-        }
-      })
-      .catch(() => undefined)
+    // Renderizado WebGL para mejor rendimiento; si falla o la card está oculta,
+    // xterm usa el renderer DOM (el efecto sobre `dormant`, más abajo, la carga
+    // y libera según visibilidad).
+    loadWebgl(term)
 
     try {
       fit.fit()
@@ -413,6 +467,8 @@ export function TerminalCard({
       dataSub.dispose()
       selSub.dispose()
       window.__orqTerms?.delete(session.id)
+      disposedRef.current = true
+      disposeWebgl()
       term.dispose()
       termRef.current = null
       setActiveTerm(null)
@@ -431,6 +487,60 @@ export function TerminalCard({
     el.addEventListener('mousedown', markSeen, { capture: true })
     return () => el.removeEventListener('mousedown', markSeen, { capture: true })
   }, [session.id])
+
+  // Visibilidad real de la card: montada pero fuera del viewport por scroll del
+  // workspace (IntersectionObserver, respeta el overflow del contenedor) o
+  // tapada por el modo enfoque de otra card (prop `obscured`, CSS/z-index puro
+  // — el IO no lo detecta).
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+    const io = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
+      threshold: 0
+    })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
+  // Histéresis asimétrica: a oculta, espera antes de marcar `dormant` (evita
+  // thrash de recorte de scrollback / dispose de WebGL durante un scroll
+  // rápido); a visible, se recupera al instante.
+  useEffect(() => {
+    const visible = inView && !obscured
+    if (dormantTimerRef.current) {
+      clearTimeout(dormantTimerRef.current)
+      dormantTimerRef.current = null
+    }
+    if (visible) {
+      setDormant(false)
+    } else {
+      dormantTimerRef.current = setTimeout(() => setDormant(true), DORMANT_DELAY_MS)
+    }
+    return () => {
+      if (dormantTimerRef.current) clearTimeout(dormantTimerRef.current)
+    }
+  }, [inView, obscured])
+
+  // Scrollback dinámico: recorta el buffer de cards ocultas para liberar memoria.
+  // No afecta el flujo ACK/replay (corre en el callback de term.write igual) ni
+  // la persistencia (serialize toma "lo que haya", y el main conserva 300KB
+  // crudos aparte para el replay al re-attach).
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.scrollback = dormant ? SCROLLBACK_DORMANT : SCROLLBACK_VISIBLE
+  }, [dormant])
+
+  // WebGL solo en cards visibles: Chromium limita ~16 contextos activos, así
+  // que liberar los de cards ocultas evita que las visibles caigan al
+  // renderer DOM en silencio.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    if (dormant) disposeWebgl()
+    else loadWebgl(term)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dormant])
 
   // Cuando el main despacha un prompt de la cola automáticamente, refleja el consumo aquí
   useEffect(() => {
@@ -589,7 +699,7 @@ export function TerminalCard({
     <div
       id={`card-${session.id}`}
       ref={cardRef}
-      className={`term-card ${exited !== null ? 'is-exited' : ''} ${state === 'working' ? 'is-working' : ''} ${state === 'attention' ? 'is-attention' : ''} ${highlighted ? 'is-highlight' : ''}`}
+      className={`term-card ${exited !== null ? 'is-exited' : ''} ${state === 'working' ? 'is-working' : ''} ${state === 'attention' ? 'is-attention' : ''} ${highlighted ? 'is-highlight' : ''} ${pinned ? 'is-pinned' : ''}`}
       style={{ '--term-color': accent } as React.CSSProperties}
       onDragEnter={(e) => {
         e.preventDefault()
@@ -728,6 +838,17 @@ export function TerminalCard({
           onClick={onToggleFocus}
         >
           ⛶
+        </button>
+        <button
+          className={`term-btn ${pinned ? 'has-cmd' : ''}`}
+          title={
+            pinned
+              ? 'Desfijar: volver a permitir mover y auto-acomodar'
+              : 'Fijar: no se mueve ni redimensiona, y el auto-acomodo la esquiva'
+          }
+          onClick={onTogglePin}
+        >
+          📌
         </button>
         <button className="term-btn" title="Reiniciar shell" onClick={restart}>
           ↻

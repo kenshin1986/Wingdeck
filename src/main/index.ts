@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, Notification, shell, Tray, Menu, n
 import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import { isAbsolute, join } from 'path'
-import { homedir } from 'os'
+import { homedir, setPriority, constants as osConstants } from 'os'
 import type {
   ActivityEvent,
   AgentKind,
@@ -256,6 +256,27 @@ function createTray(): void {
     win?.show()
     win?.focus()
   })
+}
+
+/**
+ * Reaplica la clase de prioridad de CPU a los árboles de proceso ya en marcha
+ * al togglear "Priorizar la interfaz sobre los agentes" — sin esto, el cambio
+ * solo afectaría a spawns futuros. Usa el último snapshot del monitor (hasta
+ * 2.5s viejo) más los pids raíz de cada pty; los pids ya muertos fallan en
+ * silencio (ESRCH), no son un error real.
+ */
+function applyAgentPriority(below: boolean): void {
+  const cls = below ? osConstants.priority.PRIORITY_BELOW_NORMAL : osConstants.priority.PRIORITY_NORMAL
+  const pids = new Set<number>()
+  for (const pid of Object.values(ptys?.pids() ?? {})) pids.add(pid)
+  for (const tree of Object.values(monitor?.trees() ?? {})) for (const pid of tree) pids.add(pid)
+  for (const pid of pids) {
+    try {
+      setPriority(pid, cls)
+    } catch {
+      /* proceso ya no existe u otro dueño del handle — ignorar */
+    }
+  }
 }
 
 function updateTitle(): void {
@@ -581,6 +602,7 @@ function registerIpc(): void {
   ipcMain.on('term:detach', (_e, id: string) => ptys.detach(id))
   ipcMain.on('term:startupCmd', (_e, id: string, cmd: string) => store.updateStartupCmd(id, cmd))
   ipcMain.on('term:fontSize', (_e, id: string, size: number) => store.updateFontSize(id, size))
+  ipcMain.on('term:pinned', (_e, id: string, pinned: boolean) => store.updatePinned(id, pinned))
   ipcMain.on('term:persistBuffer', (_e, id: string, text: string) => ptys.updateSerialized(id, text))
 
   // ── Sesiones previas de agentes (retomar) ─────────
@@ -659,7 +681,14 @@ function registerIpc(): void {
   ipcMain.on('clipboard:copy', (_e, text: string) => copyText(text))
 
   ipcMain.handle('settings:get', () => settings.get())
-  ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => settings.update(patch))
+  ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
+    const before = settings.get().uiPriority
+    const next = settings.update(patch)
+    if ('uiPriority' in patch && patch.uiPriority !== before) {
+      applyAgentPriority(patch.uiPriority ?? true)
+    }
+    return next
+  })
 
   ipcMain.handle('onboarding:checkClis', () => getInstalled())
   ipcMain.handle('onboarding:checkGraphify', () => checkGraphifyInstalled())

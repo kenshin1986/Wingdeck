@@ -655,6 +655,15 @@ body {
   }
 }
 
+.term-card.is-pinned {
+  border-color: color-mix(in oklab, var(--card-accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--card-accent) 35%, transparent);
+}
+
+.term-card.is-pinned .term-header {
+  cursor: default;
+}
+
 /* EXITED: una sola línea desatura riel, header, dot, chip shell y glow del título */
 .term-card.is-exited {
   --card-accent: var(--text-faint);
@@ -1410,6 +1419,23 @@ body {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* ── Split-button "Acomodar" + selector de columnas ── */
+
+.arrange-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.arrange-menu .arrange-main {
+  border-radius: 7px 0 0 7px;
+  border-right: none;
+}
+
+.arrange-menu .arrange-caret {
+  border-radius: 0 7px 7px 0;
+  padding: 5px 8px;
 }
 
 .btn-secondary:hover {

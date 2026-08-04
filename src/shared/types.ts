@@ -39,6 +39,8 @@ export interface TerminalSession {
    * hay ninguna, caen a la lista completa del cwd y al retomar se la apropian.
    */
   agentSessions?: OwnedAgentSession[]
+  /** Fijada: no se arrastra ni redimensiona, y el auto-acomodo no la mueve */
+  pinned?: boolean
 }
 
 /** Una sesión de agente asociada a la terminal que la trabajó */
@@ -88,6 +90,10 @@ export interface AppSettings {
   askOnQuit: boolean
   /** Ya se completó (o descartó) el asistente de configuración inicial */
   onboardingDone: boolean
+  /** Corre los agentes con prioridad de CPU BELOW_NORMAL para que Windows priorice la UI */
+  uiPriority: boolean
+  /** Columnas preferidas del auto-acomodo; 'auto' usa la heurística por aspecto */
+  layoutColumns: 'auto' | 1 | 2 | 3
   /**
    * Claves de API opcionales, para agentes/herramientas que soportan autenticarse por
    * variable de entorno en vez de (o además de) su login por navegador propio. Se
